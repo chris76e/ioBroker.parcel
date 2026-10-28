@@ -787,6 +787,10 @@ class Parcel extends utils.Adapter {
           }
         });
     }
+    if (!body || typeof body !== 'string') {
+      this.log.warn('Amazon-Anmeldeseite nicht erreichbar oder leer - neuer Versuch beim nächsten Abruf');
+      return;
+    }
     let form = this.extractHidden(body);
     let postUrl = this.extractFormAction(body) || amzResponseUrl || 'https://www.amazon.de/ap/signin';
 
@@ -890,6 +894,10 @@ class Parcel extends utils.Adapter {
             this.log.info('Amazon Cookies gelöscht nach Login-Fehler. Bitte Adapter neu starten.');
           } catch { /* ignore */ }
         });
+      if (!body || typeof body !== 'string') {
+        this.log.warn('Amazon-Benutzername konnte nicht gesendet werden - neuer Versuch beim nächsten Abruf');
+        return;
+      }
       form = this.extractHidden(body);
       postUrl = this.extractFormAction(body) || postUrl;
     }
@@ -1930,7 +1938,11 @@ class Parcel extends utils.Adapter {
         });
     }
     if (this.sessions['amz']) {
-      await this.getAmazonPackages();
+      try {
+        await this.getAmazonPackages();
+      } catch (error) {
+        this.log.warn('Amazon-Abruf fehlgeschlagen, andere Dienste laufen weiter: ' + (error && error.message ? error.message : error));
+      }
     }
     const statusArrays = {
       dhl: [
@@ -3734,6 +3746,7 @@ class Parcel extends utils.Adapter {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
   extractFormAction(body) {
+    if (typeof body !== 'string') return null;
     const match = body.match(/<form[^>]*name=["']signIn["'][^>]*action=["']([^"']*)["']/i);
     if (!match) return null;
     let action = match[1].replace(/&amp;/g, '&');
@@ -3744,6 +3757,7 @@ class Parcel extends utils.Adapter {
   }
   extractHidden(body) {
     const returnObject = {};
+    if (typeof body !== 'string') return returnObject;
     const matches = this.matchAll(/<input (?=[^>]* name=["']([^'"]*)|)(?=[^>]* value=["']([^'"]*)|)/g, body);
     for (const match of matches) {
       returnObject[match[1]] = match[2];
