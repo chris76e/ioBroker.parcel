@@ -93,6 +93,9 @@ Assign the datapoint `parcel.0.dhl.briefe....image` to a "String img src" elemen
 <https://forum.iobroker.net/topic/51795/test-adapter-parcel-paketverfolgung-dhl-v0-0-1>
 
 ## Changelog
+### 0.3.3-einzeln.2 (2026-10-28)
+- (chris76e) DHL-Verbesserungen aus dem Fork mproper23/ioBroker.parcel übernommen: Netzwerkfehler beim Token-Refresh behalten die Session, SSO-Selbstheilung (dhlSsoCookies), Briefankündigung über Auth0-Websitzung (auth.dhlAuth0Session), Briefe-Pause statt Abschalten, optionaler Web-Cookie-Import. Cookie-Felder werden verschlüsselt gespeichert.
+
 ### 0.3.3-einzeln.1 (2026-10-28)
 - (chris76e) Knöpfe `relogin.<dienst>`, `relogin.dhlCode`, `relogin.amzOtp`: einzelnen Dienst neu anmelden ohne Adapter-Neustart
 

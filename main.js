@@ -2,6 +2,12 @@
 
 /*
  * Created with @iobroker/create-adapter v2.0.2
+ *
+ * Fork mproper23: DHL Web-Cookie-Import + Silent Renewal
+ * Basis: Upstream v0.3.3 — letzte Änderung 2026-10-07
+ * (2026-09-23 Briefankündigung: bei DHL-Fehler 60 Min Pause statt Stillstand bis Neustart, Status in info.briefeStatus)
+ * (2026-10-07 Briefankündigung über Auth0-Websitzung dhla0/dhlr0, Erneuerung alle 20 Min via /int-login/refresh.
+ *  DHL beantwortet advices mit dem App-Token seit 16.09.2026 nur noch mit HTTP 500.)
  */
 
 // The adapter-core module gives you access to the core ioBroker functions
@@ -24,6 +30,28 @@ const dhlDecrypt = require('./lib/dhldecrypt');
 const { loginDhlNew: dhlLoginNew } = require('./lib/dhlLogin');
 const { loginDPD: dpdLoginSoap, fetchDPDParcels: dpdFetchParcels } = require('./lib/dpdLogin');
 const { classifyGlsDeliveryStatus } = require('./lib/glsStatus');
+// Wartezeit bis zum nächsten Abruf der Briefankündigung nach einem DHL-Fehler
+const BRIEFE_PAUSE_MIN = 60;
+
+const DHL_SSO_AUTHORIZE = 'https://login.dhl.de/af5f9bb6-27ad-4af4-9445-008e7a5cddb8/login/authorize';
+const DHL_APP_CLIENT_ID = '83471082-5c13-4fce-8dcb-19d2a3fca413';
+const DHL_APP_REDIRECT = 'dhllogin://de.deutschepost.dhl/login';
+// Muss zum CODE_VERIFIER in lib/dhlLogin.js und zum Login-Link in admin/index_m.html passen
+const DHL_APP_CODE_CHALLENGE = 'MAhrhXXZP-Owy-R7ruyB7Fn-Z8ODW6qxCoHg4uXELCw';
+const DHL_APP_STATE =
+  'eyJycyI6dHJ1ZSwicnYiOmZhbHNlLCJmaWQiOiJhcHAtbG9naW4tbWVoci1mb290ZXIiLCJoaWQiOiJhcHAtbG9naW4tbWVoci1oZWFkZXIiLCJycCI6ZmFsc2V9';
+const DHL_SSO_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:141.0) Gecko/20100101 Firefox/141.0';
+
+// Auth0-Websitzung (seit Sept. 2026): dhla0 = Access-JWT (30 Min), dhlr0 = Refresh, rotiert bei jeder Erneuerung
+const DHL_AUTH0_REFRESH_URL = 'https://www.dhl.de/int-login/refresh';
+const DHL_AUTH0_COOKIES = ['dhla0', 'dhlr0', 'dhlb', 'dhld'];
+const DHL_AUTH0_REFRESH_MIN = 20;
+
+const DHL_WEB_CLIENT_ID ='a4bd86e5-16b9-412d-9180-3f0935061868';
+const DHL_WEB_REDIRECT = 'https://www.dhl.de/int-login/login/token';
+const DHL_WEB_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
 // Dienste, die einzeln neu angemeldet werden können (id = Schlüssel in this.sessions, state = Knopf unter relogin.)
 const PROVIDERS = [
   { id: 'amz', state: 'amazon', name: 'Amazon' },
@@ -59,6 +87,10 @@ class Parcel extends utils.Adapter {
     this.images = {};
     this.alreadySentMessages = {};
     this.ignoredPath = [];
+    this.briefePauseBis = 0;
+    this.briefeFehler = null;
+    this.dhlAuth0 = null;
+    this.dhlAuth0Fehler = null;
     this.firstStart = true;
     this.reloginRunning = {};
     this.delivery_status = {
@@ -144,6 +176,20 @@ class Parcel extends utils.Adapter {
         this.refreshToken();
       }, 29 * 60 * 1000);
     }
+    if (!this.dhlAuth0Interval) {
+      this.dhlAuth0Interval = setInterval(() => {
+        this.dhlAuth0 && this.refreshDhlAuth0Session();
+      }, DHL_AUTH0_REFRESH_MIN * 60 * 1000);
+    }
+    // Hält die login.dhl.de-SSO-Session rollierend am Leben, damit sie nie abläuft
+    if (this.config.dhlActive !== false && !this.dhlSsoKeepAliveInterval) {
+      this.dhlSsoKeepAliveInterval = setInterval(
+        () => {
+          this.renewDhlAppSessionViaSso().catch((e) => this.log.debug('SSO-KeepAlive: ' + (e && e.message)));
+        },
+        12 * 60 * 60 * 1000,
+      );
+    }
   }
   /**
    * Anmeldung eines einzelnen Dienstes (wie beim Adapterstart).
@@ -170,6 +216,31 @@ class Parcel extends utils.Adapter {
             this.sessions['dhl'] = JSON.parse(String(dhlSessionState.val));
             await this.refreshToken('dhl');
             await this.createDHLStates();
+          }
+        }
+        // Keine App-Session (Code verbraucht, Session gelöscht, Adapter länger aus)?
+        // Dann ohne Nutzerinteraktion über die gespeicherte SSO-Session neu anmelden.
+        if (!this.sessions['dhl']) {
+          try {
+            if (await this.renewDhlAppSessionViaSso()) {
+              await this.createDHLStates();
+            }
+          } catch (e) {
+            this.log.warn('DHL SSO-Renewal fehlgeschlagen: ' + (e && e.message));
+          }
+        }
+        // Auth0-Websitzung für die Briefankündigung (Import über State auth.dhlAuth0Session, ack=false)
+        try {
+          await this.initDhlAuth0Session();
+        } catch (e) {
+          this.log.warn('DHL Auth0-Sitzung: ' + (e && e.message));
+        }
+        // Optional: DHL Web-Session aus manuell exportierten Browser-Cookies (Pakete im Kundenkonto)
+        if (this.config.dhlWebLogin) {
+          try {
+            await this.initDhlWebSession();
+          } catch (e) {
+            this.log.error('DHL Web-Login fehlgeschlagen: ' + (e && e.message));
           }
         }
       }
@@ -1823,9 +1894,12 @@ class Parcel extends utils.Adapter {
           }
         }
       }
+      const useDhlWeb = !!(this.dhlWebSession && this.dhlWebSession.cookies && this.dhlWebSession.cookies.dhli);
+      const dhlSearchUrl =
+        'https://www.dhl.de/int-verfolgen/data/search?noRedirect=true&language=de' + (useDhlWeb ? '' : '&cid=app');
       dataDhl = await this.requestClient({
         method: 'get',
-        url: 'https://www.dhl.de/int-verfolgen/data/search?noRedirect=true&language=de&cid=app',
+        url: dhlSearchUrl,
         headers: {
           accept: 'application/json',
           'content-type': 'application/json',
@@ -1848,7 +1922,7 @@ class Parcel extends utils.Adapter {
           if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
             this.log.info('DHL is not available. Maybe the DHL service down or overloaded at the moment');
           } else {
-            this.log.error('Failed to get https://www.dhl.de/int-verfolgen/data/search?noRedirect=true&language=de&cid=app');
+            this.log.error('Failed to get ' + dhlSearchUrl);
             this.logAxiosError('DHL/fetch', error);
             error.response && this.log.error(JSON.stringify(error.response.data));
           }
@@ -1862,7 +1936,11 @@ class Parcel extends utils.Adapter {
       dhl: [
         {
           path: 'dhl',
-          url: 'https://www.dhl.de/int-verfolgen/data/search?piececode=' + dataDhl + '&noRedirect=true&language=de&cid=app',
+          url:
+            'https://www.dhl.de/int-verfolgen/data/search?piececode=' +
+            dataDhl +
+            '&noRedirect=true&language=de' +
+            (this.dhlWebSession && this.dhlWebSession.cookies && this.dhlWebSession.cookies.dhli ? '' : '&cid=app'),
           header: {
             accept: 'application/json',
             'content-type': 'application/json',
@@ -1967,18 +2045,31 @@ class Parcel extends utils.Adapter {
               const data = await this.fetchDPDParcels();
               return { data: data || null };
             }
-            : () => this.requestClient({
-              method: element.method ? element.method : 'get',
-              url: element.url,
-              headers: element.header,
-              data: element.data,
-              timeout: element.url && element.url.includes('dhl.de') ? 15000 : undefined,
-            });
+            : element.path === 'dhl.briefe' && this.dhlAuth0Gueltig()
+            // Briefankündigung mit Auth0-Token, ohne Cookie-Jar (sonst ginge der App-Token dhli mit)
+              ? () => axios({
+                method: 'get',
+                url: element.url,
+                headers: { ...element.header, cookie: 'dhla0=' + this.dhlAuth0.cookies.dhla0 },
+                timeout: 15000,
+              })
+              : () => this.requestClient({
+                method: element.method ? element.method : 'get',
+                url: element.url,
+                headers: element.header,
+                data: element.data,
+                timeout: element.url && element.url.includes('dhl.de') ? 15000 : undefined,
+              });
         if (!element.custom) {
           this.log.debug(element.url);
         }
         if (this.ignoredPath.includes(element.path)) {
           this.log.debug('Ignore: ' + element.path);
+          continue;
+        }
+        // Briefankündigung nach einem DHL-Fehler nur pausieren, nicht bis zum Neustart abschalten
+        if (element.path === 'dhl.briefe' && this.briefePauseBis && Date.now() < this.briefePauseBis) {
+          this.log.debug('Briefankündigung pausiert bis ' + new Date(this.briefePauseBis).toLocaleString());
           continue;
         }
         await requestFn()
@@ -2035,6 +2126,14 @@ class Parcel extends utils.Adapter {
                 return sendung.sendungsinfo.sendungsliste !== 'ARCHIVIERT';
               });
             }
+            if (element.path === 'dhl.briefe') {
+              if (this.briefeFehler) {
+                this.log.info('Briefankündigung funktioniert wieder');
+              }
+              this.briefeFehler = null;
+              this.briefePauseBis = 0;
+              this.setState('info.briefeStatus', 'OK', true);
+            }
             //activate briefe token
             if (element.path === 'dhl.briefe' && res.data.grantToken) {
               await this.activateToken(res.data.grantToken, res.data.accessTokenUrl);
@@ -2053,12 +2152,7 @@ class Parcel extends utils.Adapter {
           })
           .catch((error) => {
             if (error.response) {
-              if (error.response.status === 401 && id !== '17track') {
-                if (element.path === 'dhl.briefe') {
-                  this.log.debug(error);
-                  return;
-                }
-
+              if (error.response.status === 401 && id !== '17track' && element.path !== 'dhl.briefe') {
                 error.response && this.log.debug(JSON.stringify(error.response.data));
 
                 this.log.info(element.path + ' receive 401 error. Refresh Token in 60 seconds');
@@ -2071,8 +2165,21 @@ class Parcel extends utils.Adapter {
                 return;
               }
               if (element.path === 'dhl.briefe') {
-                this.log.info('Briefankündigung is not working. Stopped until restart');
-                this.ignoredPath.push(element.path);
+                // Früher: ignoredPath bis zum Neustart. DHL-Störungen (HTTP 500 "Aktuell steht der
+                // Service leider nicht zur Verfügung") dauern aber Tage, danach muss es von selbst weitergehen.
+                const body = error.response.data;
+                const headline = Array.isArray(body) && body[0] && body[0].headline ? body[0].headline : '';
+                const fehler =
+                  'HTTP ' + error.response.status + (headline ? ': ' + headline : '') +
+                  (this.dhlAuth0Gueltig() ? '' : ', ohne gültige Auth0-Sitzung (auth.dhlAuth0Session neu importieren)');
+                this.briefePauseBis = Date.now() + BRIEFE_PAUSE_MIN * 60 * 1000;
+                this.setState('info.briefeStatus', 'DHL-Fehler (' + fehler + '), nächster Versuch in ' + BRIEFE_PAUSE_MIN + ' Min', true);
+                if (this.briefeFehler !== fehler) {
+                  this.log.warn('Briefankündigung nicht verfügbar (' + fehler + '). Neuer Versuch alle ' + BRIEFE_PAUSE_MIN + ' Min, weitere gleiche Fehler nur im Debug-Log.');
+                }
+                this.briefeFehler = fehler;
+                this.log.debug(element.url + ' ' + JSON.stringify(body));
+                return;
               }
             }
             if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
@@ -2920,6 +3027,542 @@ class Parcel extends utils.Adapter {
       });
   }
 
+  // ============================================================
+  // DHL Web-Login (Pakete im Kundenkonto, Cookie-Import-Flow)
+  // ============================================================
+
+  // ---- SSO-Selbstheilung: neuen dhllogin://-Code aus der login.dhl.de-Session ziehen ----
+
+  parseCookiePairs(raw) {
+    const out = {};
+    if (!raw || typeof raw !== 'string') return out;
+    for (const part of raw.replace(/^[Cc]ookie:\s*/, '').trim().split(/;\s*/)) {
+      const eq = part.indexOf('=');
+      if (eq < 1) continue;
+      out[part.substring(0, eq).trim()] = part.substring(eq + 1).trim();
+    }
+    return out;
+  }
+
+  serializeCookiePairs(pairs) {
+    return Object.entries(pairs)
+      .filter(([n, v]) => n && v)
+      .map(([n, v]) => n + '=' + v)
+      .join('; ');
+  }
+
+  mergeSetCookies(pairs, setCookieHeaders) {
+    for (const line of setCookieHeaders || []) {
+      const first = String(line).split(';')[0];
+      const eq = first.indexOf('=');
+      if (eq < 1) continue;
+      const name = first.substring(0, eq).trim();
+      const value = first.substring(eq + 1).trim();
+      if (name && value && value !== 'deleted') pairs[name] = value;
+    }
+    return pairs;
+  }
+
+  /**
+   * Holt über die gespeicherte login.dhl.de-SSO-Session (prompt=none) einen frischen
+   * Authorization-Code und tauscht ihn gegen eine neue App-Session. Ohne Nutzerinteraktion.
+   *
+   * @returns {Promise<boolean>} true, wenn eine neue App-Session aktiv ist
+   */
+  async renewDhlAppSessionViaSso() {
+    let pairs = {};
+    const stored = await this.getStateAsync('auth.dhlSsoCookies');
+    if (stored && stored.val) {
+      try {
+        pairs = JSON.parse(String(stored.val));
+      } catch {
+        pairs = {};
+      }
+    }
+    if (!Object.keys(pairs).length && this.config.dhlSsoCookies) {
+      pairs = this.parseCookiePairs(this.config.dhlSsoCookies);
+    }
+    const hasSsoCookie = Object.keys(pairs).some((n) => n.indexOf('aic_sb') === 0);
+    if (!hasSsoCookie) {
+      this.log.debug('DHL SSO-Renewal übersprungen: keine aic_sb-Cookies hinterlegt');
+      return false;
+    }
+
+    const params = new URLSearchParams({
+      redirect_uri: DHL_APP_REDIRECT,
+      state: DHL_APP_STATE,
+      client_id: DHL_APP_CLIENT_ID,
+      response_type: 'code',
+      scope: 'openid offline_access',
+      claims:
+        '{"id_token":{"email":null,"post_number":null,"twofa":null,"service_mask":null,"deactivate_account":null,"last_login":null,"customer_type":null,"display_name":null,"data_confirmation_required":null}}',
+      nonce: '',
+      login_hint: '',
+      prompt: 'none',
+      ui_locales: 'de-DE',
+      code_challenge: DHL_APP_CODE_CHALLENGE,
+      code_challenge_method: 'S256',
+    });
+
+    let currentUrl = DHL_SSO_AUTHORIZE + '?' + params.toString();
+    let code = null;
+    for (let hop = 0; hop < 10; hop++) {
+      let resp;
+      try {
+        resp = await axios.get(currentUrl, {
+          headers: {
+            'User-Agent': DHL_SSO_USER_AGENT,
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'de,en-US;q=0.7,en;q=0.3',
+            Cookie: this.serializeCookiePairs(pairs),
+          },
+          maxRedirects: 0,
+          validateStatus: (s) => s >= 200 && s < 400,
+          timeout: 15000,
+        });
+      } catch (e) {
+        if (e.response && e.response.status >= 300 && e.response.status < 400) {
+          resp = e.response;
+        } else {
+          this.log.warn('DHL SSO-Renewal: Anfrage fehlgeschlagen (' + (e.code || e.message) + ')');
+          return false;
+        }
+      }
+      this.mergeSetCookies(pairs, resp.headers['set-cookie']);
+      const loc = resp.headers['location'] || resp.headers['Location'] || '';
+      if (!(resp.status >= 300 && resp.status < 400 && loc)) {
+        this.log.warn('DHL SSO-Renewal: kein Redirect bei Hop ' + hop + ' (Status ' + resp.status + ')');
+        return false;
+      }
+      if (loc.indexOf('error=') > -1) {
+        const m = loc.match(/error=([^&]+)/);
+        this.log.warn(
+          'DHL SSO-Renewal abgelehnt (' + (m ? decodeURIComponent(m[1]) : 'unbekannt') + ') — SSO-Cookies erneuern.',
+        );
+        return false;
+      }
+      if (loc.indexOf('code=') > -1) {
+        const m = loc.match(/[?&]code=([^&]+)/);
+        if (m) {
+          code = decodeURIComponent(m[1]);
+          break;
+        }
+      }
+      currentUrl = loc.startsWith('http') ? loc : 'https://login.dhl.de' + loc;
+    }
+
+    // Cookies rollierend zurückschreiben, damit die SSO-Session am Leben bleibt
+    await this.extendObject('auth.dhlSsoCookies', {
+      type: 'state',
+      common: { name: 'DHL SSO Cookies', type: 'string', role: 'json', read: true, write: false },
+      native: {},
+    });
+    this.setState('auth.dhlSsoCookies', JSON.stringify(pairs), true);
+
+    if (!code) {
+      this.log.warn('DHL SSO-Renewal: kein Code erhalten');
+      return false;
+    }
+
+    const sessionData = await dhlLoginNew({
+      requestClient: this.requestClient.bind(this),
+      dhlCode: DHL_APP_REDIRECT + '?code=' + encodeURIComponent(code),
+      log: this.log,
+    });
+    if (!sessionData || !sessionData.refresh_token) {
+      this.log.warn('DHL SSO-Renewal: Token-Tausch fehlgeschlagen');
+      return false;
+    }
+    this.sessions['dhl'] = sessionData;
+    this.dhlRefreshFailures = 0;
+    await this.cookieJar.setCookie('dhli=' + sessionData.id_token + '; path=/; domain=dhl.de', 'https:/dhl.de');
+    await this.cookieJar.setCookie('dhli=' + sessionData.id_token + '; path=/; domain=www.dhl.de', 'https:/www.dhl.de');
+    this.setState('auth.cookie', JSON.stringify(this.cookieJar.toJSON()), true);
+    this.setState('auth.dhlSession', JSON.stringify(sessionData), true);
+    this.setState('info.connection', true, true);
+    this.log.info('DHL App-Session automatisch über SSO-Session erneuert');
+    return true;
+  }
+
+  parseDhlWebCookieHeader(raw) {
+    if (!raw || typeof raw !== 'string') return null;
+    const text = raw.replace(/^[Cc]ookie:\s*/, '').trim();
+    if (!text) return null;
+    const cookies = {};
+    for (const part of text.split(/;\s*/)) {
+      const eq = part.indexOf('=');
+      if (eq < 1) continue;
+      const name = part.substring(0, eq).trim();
+      const value = part.substring(eq + 1).trim();
+      if (name) cookies[name] = value;
+    }
+    if (!cookies.dhli || cookies.dhli.length < 100) return null;
+    let expiresAt = Date.now() + 25 * 60 * 1000;
+    try {
+      const payload = JSON.parse(Buffer.from(cookies.dhli.split('.')[1], 'base64').toString());
+      if (payload.exp) expiresAt = payload.exp * 1000;
+    } catch {
+      /* ignore */
+    }
+    return {
+      cookies,
+      id_token: cookies.dhli,
+      refresh_token: cookies.dhlr || '',
+      expires_at: expiresAt,
+    };
+  }
+
+  extractTokensFromCallbackHtml(html) {
+    if (!html) return null;
+    const patterns = [/atob\(\s*"([^"]+)"\s*\)/, /atob\(\s*'([^']+)'\s*\)/, /atob\(\s*`([^`]+)`\s*\)/];
+    let b64raw = null;
+    for (const p of patterns) {
+      const m = html.match(p);
+      if (m) {
+        b64raw = m[1];
+        break;
+      }
+    }
+    if (!b64raw) return null;
+    const clean = b64raw.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+    const tries = [
+      () => JSON.parse(decodeURIComponent(Buffer.from(clean, 'base64').toString('binary'))),
+      () => JSON.parse(Buffer.from(clean, 'base64').toString('utf8')),
+      () => JSON.parse(decodeURIComponent(Buffer.from(clean, 'base64').toString('utf8'))),
+    ];
+    for (const t of tries) {
+      try {
+        return t();
+      } catch {
+        /* try next */
+      }
+    }
+    return null;
+  }
+
+  /** Liest den exp-Zeitpunkt (ms) aus einem JWT, 0 wenn nicht lesbar */
+  jwtExpMs(token) {
+    try {
+      return JSON.parse(Buffer.from(String(token).split('.')[1], 'base64url').toString()).exp * 1000;
+    } catch {
+      return 0;
+    }
+  }
+
+  dhlAuth0Gueltig() {
+    return !!(this.dhlAuth0 && this.dhlAuth0.cookies && this.jwtExpMs(this.dhlAuth0.cookies.dhla0) > Date.now() + 30 * 1000);
+  }
+
+  /** Akzeptiert JSON {dhla0,dhlr0,...}, {cookies:{...}} oder einen Cookie-Header "dhla0=...; dhlr0=..." */
+  parseDhlAuth0Import(val) {
+    const text = String(val || '').trim();
+    let obj;
+    if (text.startsWith('{')) {
+      obj = JSON.parse(text);
+      if (obj.cookies) obj = obj.cookies;
+    } else {
+      obj = {};
+      for (const teil of text.replace(/^cookie:\s*/i, '').split(';')) {
+        const i = teil.indexOf('=');
+        if (i > 0) obj[teil.slice(0, i).trim()] = teil.slice(i + 1).trim();
+      }
+    }
+    const cookies = {};
+    for (const name of DHL_AUTH0_COOKIES) {
+      if (obj[name]) cookies[name] = obj[name];
+    }
+    if (!cookies.dhlr0) throw new Error('Import ohne dhlr0-Cookie');
+    return { cookies };
+  }
+
+  async storeDhlAuth0Session() {
+    this.dhlAuth0.updated = Date.now();
+    this.dhlAuth0.expires_at = this.jwtExpMs(this.dhlAuth0.cookies.dhla0);
+    await this.setStateAsync('auth.dhlAuth0Session', JSON.stringify(this.dhlAuth0), true);
+  }
+
+  async initDhlAuth0Session() {
+    await this.extendObject('auth.dhlAuth0Session', {
+      type: 'state',
+      common: {
+        name: 'DHL Auth0-Websitzung (Briefankündigung). Import: Cookie-Header oder JSON mit dhla0/dhlr0 als ack=false schreiben',
+        type: 'string',
+        role: 'json',
+        read: true,
+        write: true,
+      },
+      native: {},
+    });
+    const st = await this.getStateAsync('auth.dhlAuth0Session');
+    if (!st || !st.val) {
+      this.log.info('Keine DHL Auth0-Sitzung vorhanden, Briefankündigung läuft nur mit App-Token');
+      return;
+    }
+    this.dhlAuth0 = st.ack ? JSON.parse(String(st.val)) : this.parseDhlAuth0Import(st.val);
+    await this.refreshDhlAuth0Session();
+  }
+
+  /** Erneuert dhla0 über dhlr0. Transiente Fehler lassen die Sitzung bestehen. */
+  async refreshDhlAuth0Session() {
+    if (!this.dhlAuth0 || !this.dhlAuth0.cookies || !this.dhlAuth0.cookies.dhlr0) return false;
+    const cookieHeader = Object.entries(this.dhlAuth0.cookies)
+      .filter(([k, v]) => k && v)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('; ');
+    const form = new FormData();
+    form.append('bForceRefresh', 'true');
+    form.append('bAfterMasterDataChange', 'false');
+    try {
+      const res = await axios.post(DHL_AUTH0_REFRESH_URL, form, {
+        headers: {
+          cookie: cookieHeader,
+          'user-agent': DHL_SSO_USER_AGENT,
+          origin: 'https://www.dhl.de',
+          referer: 'https://www.dhl.de/de/privatkunden.html',
+          accept: 'application/json, text/plain, */*',
+        },
+        timeout: 20000,
+        maxRedirects: 0,
+      });
+      let neu = 0;
+      for (const zeile of res.headers['set-cookie'] || []) {
+        const paar = zeile.split(';')[0];
+        const i = paar.indexOf('=');
+        const name = paar.slice(0, i).trim();
+        if (DHL_AUTH0_COOKIES.includes(name) && paar.slice(i + 1)) {
+          this.dhlAuth0.cookies[name] = paar.slice(i + 1);
+          neu++;
+        }
+      }
+      if (!neu) throw new Error('Antwort ohne neue Cookies (HTTP ' + res.status + ')');
+      await this.storeDhlAuth0Session();
+      if (this.dhlAuth0Fehler) {
+        this.log.info('DHL Auth0-Sitzung wieder erneuert');
+      }
+      this.dhlAuth0Fehler = null;
+      this.log.debug('DHL Auth0-Sitzung erneuert, gültig bis ' + new Date(this.dhlAuth0.expires_at).toLocaleString());
+      return true;
+    } catch (e) {
+      const status = e.response && e.response.status;
+      const fehler = status ? 'HTTP ' + status + ' ' + JSON.stringify(e.response.data).slice(0, 200) : e.message;
+      if (this.dhlAuth0Fehler !== fehler) {
+        this.log.warn(
+          'DHL Auth0-Erneuerung fehlgeschlagen (' + fehler + '). ' +
+            (status && status < 500 && status !== 429
+              ? 'Sitzung vermutlich ungültig: auf dhl.de mit "Angemeldet bleiben" einloggen und Cookies neu in auth.dhlAuth0Session importieren.'
+              : 'Neuer Versuch beim nächsten Intervall.'),
+        );
+      }
+      this.dhlAuth0Fehler = fehler;
+      return false;
+    }
+  }
+
+  async applyDhlWebCookiesToJar() {
+    if (!this.dhlWebSession || !this.dhlWebSession.cookies) return;
+    // Schutz: niemals einen abgelaufenen Web-Token über den gültigen App-Token legen
+    if (this.dhlWebSession.expires_at && this.dhlWebSession.expires_at <= Date.now()) {
+      this.log.debug('Web-Cookies nicht angewendet — Token abgelaufen');
+      return;
+    }
+    for (const [name, value] of Object.entries(this.dhlWebSession.cookies)) {
+      if (!name || !value) continue;
+      try {
+        await this.cookieJar.setCookie(`${name}=${value}; path=/; domain=dhl.de`, 'https://dhl.de');
+        await this.cookieJar.setCookie(`${name}=${value}; path=/; domain=www.dhl.de`, 'https://www.dhl.de');
+      } catch {
+        /* ignore single cookie failures */
+      }
+    }
+    this.setState('auth.cookie', JSON.stringify(this.cookieJar.toJSON()), true);
+  }
+
+  async storeDhlWebSession(session) {
+    this.dhlWebSession = session;
+    await this.extendObject('auth.dhlWebSession', {
+      type: 'state',
+      common: { name: 'DHL Web Session', type: 'string', role: 'json', read: true, write: false },
+      native: {},
+    });
+    await this.setStateAsync('auth.dhlWebSession', JSON.stringify(session), true);
+  }
+
+  async refreshDhlWebSession(session) {
+    if (!session || !session.cookies || !session.cookies.dhli) return null;
+    const cookieHeader = Object.entries(session.cookies)
+      .filter(([k, v]) => k && v)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('; ');
+
+    const cvChars = '0123456789abcdef';
+    let cv = '';
+    for (let i = 0; i < 64; i++) cv += cvChars[Math.floor(Math.random() * 16)];
+    const codeChallenge = crypto
+      .createHash('sha256')
+      .update(cv)
+      .digest('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+
+    const params = new URLSearchParams({
+      client_id: DHL_WEB_CLIENT_ID,
+      response_type: 'code',
+      scope: 'openid offline_access',
+      redirect_uri: DHL_WEB_REDIRECT,
+      prompt: 'none',
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
+      state: 's-' + Date.now(),
+      nonce: 'n-' + Date.now(),
+      ui_locales: 'de-DE',
+      acr_values: 'urn:akamai-ic:nist:800-63-3:aal:2',
+      claims:
+        '{"id_token":{"acr":{"essential":false,"values":["urn:akamai-ic:nist:800-63-3:aal:2"]},"customer_type":null,"display_name":null,"email":null,"post_number":null,"service_mask":null,"twofa":null}}',
+    });
+
+    let currentUrl = 'https://login.dhl.de/af5f9bb6-27ad-4af4-9445-008e7a5cddb8/login/authorize?' + params.toString();
+    let code = null;
+    for (let hop = 0; hop < 8; hop++) {
+      let resp;
+      try {
+        resp = await axios.get(currentUrl, {
+          headers: { 'User-Agent': DHL_WEB_USER_AGENT, Accept: '*/*', Cookie: cookieHeader },
+          maxRedirects: 0,
+          validateStatus: (s) => s >= 200 && s < 400,
+          timeout: 15000,
+        });
+      } catch (e) {
+        if (e.response && e.response.status >= 300 && e.response.status < 400) {
+          resp = e.response;
+        } else {
+          this.log.warn('DHL Web-Refresh: Authorize fehlgeschlagen (' + (e.code || e.message) + ')');
+          return null;
+        }
+      }
+      const loc = resp.headers['location'] || resp.headers['Location'] || '';
+      if (resp.status >= 300 && resp.status < 400 && loc) {
+        if (loc.includes('code=')) {
+          const u = new URL(loc.startsWith('http') ? loc : 'https://login.dhl.de' + loc);
+          code = u.searchParams.get('code');
+          if (code) break;
+        }
+        currentUrl = loc.startsWith('http') ? loc : 'https://login.dhl.de' + loc;
+      } else {
+        this.log.debug('DHL Web-Refresh: kein redirect bei hop ' + hop + ', status=' + resp.status);
+        break;
+      }
+    }
+    if (!code) {
+      this.log.warn('DHL Web-Refresh: kein code via prompt=none — Cookies vermutlich abgelaufen, bitte neu importieren');
+      return null;
+    }
+
+    let cbResp;
+    try {
+      cbResp = await axios.get(
+        DHL_WEB_REDIRECT + '?code=' + encodeURIComponent(code) + '&state=s-' + Date.now(),
+        {
+          headers: { 'User-Agent': DHL_WEB_USER_AGENT, Accept: 'text/html,*/*', Cookie: cookieHeader },
+          maxRedirects: 0,
+          validateStatus: (s) => s >= 200 && s < 400,
+          timeout: 15000,
+        },
+      );
+    } catch (e) {
+      this.log.warn('DHL Web-Refresh: Callback fehlgeschlagen (' + (e.code || e.message) + ')');
+      return null;
+    }
+
+    const html = typeof cbResp.data === 'string' ? cbResp.data : '';
+    const tokens = this.extractTokensFromCallbackHtml(html);
+    if (tokens && (tokens.akamaiError || tokens.wasTokenExchangeFromAkamai)) {
+      this.log.warn(
+        'DHL Web-Refresh: Akamai blockiert (' + (tokens.akamaiError || 'wasTokenExchangeFromAkamai=true') + ')',
+      );
+      return null;
+    }
+    const idTok = tokens && (tokens.id_token || tokens.idToken || tokens.access_token || tokens.accessToken);
+    const refTok = tokens && (tokens.refresh_token || tokens.refreshToken);
+    if (!idTok) {
+      this.log.warn('DHL Web-Refresh: keine Tokens im Callback (status=' + cbResp.status + ', len=' + html.length + ')');
+      return null;
+    }
+    const newCookies = { ...session.cookies, dhli: idTok };
+    if (refTok) newCookies.dhlr = refTok;
+    return {
+      cookies: newCookies,
+      id_token: idTok,
+      refresh_token: refTok || session.refresh_token,
+      expires_at: Date.now() + ((tokens.expires_in || 1800) * 1000),
+    };
+  }
+
+  async initDhlWebSession() {
+    const stored = await this.getStateAsync('auth.dhlWebSession');
+    if (stored && stored.val) {
+      try {
+        const session = JSON.parse(String(stored.val));
+        if (session && session.cookies && session.cookies.dhli) {
+          if (session.expires_at && session.expires_at - Date.now() > 300000) {
+            this.dhlWebSession = session;
+            await this.applyDhlWebCookiesToJar();
+            this.log.info(
+              'DHL Web-Session aus Speicher übernommen (gültig bis ' + new Date(session.expires_at).toISOString() + ')',
+            );
+            return session;
+          }
+          this.log.debug('DHL Web-Session läuft bald ab — Silent Renewal');
+          const refreshed = await this.refreshDhlWebSession(session);
+          if (refreshed) {
+            await this.storeDhlWebSession(refreshed);
+            await this.applyDhlWebCookiesToJar();
+            this.log.info('DHL Web-Session via Silent Renewal aktualisiert');
+            return refreshed;
+          }
+          this.dhlWebSession = null;
+          this.log.info('DHL Web-Refresh fehlgeschlagen — bitte neue Cookies in der Adapter-Config eintragen');
+        }
+      } catch (e) {
+        this.log.debug('Stored DHL Web-Session unbrauchbar: ' + e.message);
+      }
+    }
+    const rawCookies = this.config.dhlWebCookies;
+    if (rawCookies) {
+      const parsed = this.parseDhlWebCookieHeader(rawCookies);
+      if (parsed) {
+        this.log.info(
+          'DHL Web-Session aus Config-Cookies initialisiert (Token gültig bis ' +
+            new Date(parsed.expires_at).toISOString() +
+            ')',
+        );
+        const refreshed = await this.refreshDhlWebSession(parsed);
+        const final = refreshed || parsed;
+        // Ein abgelaufener Web-Token darf den gültigen App-Token im Cookie-Jar NICHT überschreiben,
+        // sonst liefert die Sendungsabfrage keine Ergebnisse mehr.
+        if (!final.expires_at || final.expires_at <= Date.now()) {
+          this.dhlWebSession = null;
+          this.log.warn(
+            'DHL Web-Cookies sind abgelaufen und konnten nicht erneuert werden — Web-Login bleibt inaktiv, ' +
+              'die App-Sendungsverfolgung läuft normal weiter.',
+          );
+          return null;
+        }
+        await this.storeDhlWebSession(final);
+        await this.applyDhlWebCookiesToJar();
+        return final;
+      }
+      this.log.warn(
+        'DHL Web-Cookies in Config konnten nicht geparsed werden (kein dhli? zu kurz?). Erwarte Cookie-Header wie "dhli=...; dhlr=...; ..."',
+      );
+    } else {
+      this.log.info(
+        'DHL Web-Login aktiviert, aber keine Cookies in Config — bitte aus Browser kopieren und in Adapter-Einstellungen eintragen.',
+      );
+    }
+    return null;
+  }
+
   /**
    * @param {string} [onlyId] - nur diesen Dienst erneuern (sonst alle)
    */
@@ -2958,10 +3601,31 @@ class Parcel extends utils.Adapter {
             this.setState('auth.dhlSession', JSON.stringify(res.data), true);
             this.setState('info.connection', true, true);
           })
-          .catch((error) => {
+          .catch(async (error) => {
+            // Netzwerkaussetzer (ECONNRESET/Timeout/5xx) sind bei DHL Alltag und bedeuten NICHT,
+            // dass der refresh_token ungültig ist — Session behalten und beim nächsten Lauf erneut versuchen.
+            const status = error.response && error.response.status;
+            const transient = !error.response || status >= 500 || status === 429;
+            if (transient) {
+              this.dhlRefreshFailures = (this.dhlRefreshFailures || 0) + 1;
+              this.log.warn(
+                'DHL Token-Refresh vorübergehend fehlgeschlagen (' +
+                  (error.code || status || error.message) +
+                  '), Versuch ' +
+                  this.dhlRefreshFailures +
+                  ' — Session bleibt erhalten.',
+              );
+              return;
+            }
+            this.dhlRefreshFailures = 0;
             this.log.error('refresh token failed');
             this.logAxiosError('DHL/refresh', error);
             error.response && this.log.error(JSON.stringify(error.response.data));
+            // Refresh-Token wirklich ungültig → Selbstheilung über die gespeicherte SSO-Session versuchen
+            const renewed = await this.renewDhlAppSessionViaSso();
+            if (renewed) {
+              return;
+            }
             this.log.error('Refresh token expired. Bitte einen neuen dhllogin:// Code in den Adaptereinstellungen eingeben.');
             delete this.sessions['dhl'];
             this.setState('auth.dhlSession', '', true);
@@ -3005,6 +3669,19 @@ class Parcel extends utils.Adapter {
           });
       }
     }
+    // DHL Web-Session erneuern (silent renewal mit prompt=none) — unabhängig vom App-Session-Status
+    if (this.dhlWebSession && this.dhlWebSession.cookies && this.dhlWebSession.cookies.dhli) {
+      try {
+        const refreshed = await this.refreshDhlWebSession(this.dhlWebSession);
+        if (refreshed) {
+          await this.storeDhlWebSession(refreshed);
+          await this.applyDhlWebCookiesToJar();
+          this.log.debug('DHL Web-Session erneuert (silent renewal)');
+        }
+      } catch (e) {
+        this.log.warn('DHL Web-Refresh fehlgeschlagen: ' + (e && e.message));
+      }
+    }
   }
   async createDHLStates() {
     await this.setObjectNotExistsAsync('dhl', {
@@ -3034,6 +3711,18 @@ class Parcel extends utils.Adapter {
         read: true,
         type: 'string',
         role: 'json',
+      },
+      native: {},
+    });
+    // Liegt bewusst unter info.*, weil cleanupProvider den Zweig dhl.briefe komplett neu aufbaut.
+    await this.setObjectNotExistsAsync('info.briefeStatus', {
+      type: 'state',
+      common: {
+        name: 'Status DHL Briefankündigung (Zeitstempel = letzter Abrufversuch)',
+        write: false,
+        read: true,
+        type: 'string',
+        role: 'text',
       },
       native: {},
     });
@@ -3082,6 +3771,8 @@ class Parcel extends utils.Adapter {
       this.refreshTokenTimeout && clearTimeout(this.refreshTokenTimeout);
       this.updateInterval && clearInterval(this.updateInterval);
       this.refreshTokenInterval && clearInterval(this.refreshTokenInterval);
+      this.dhlSsoKeepAliveInterval && clearInterval(this.dhlSsoKeepAliveInterval);
+      this.dhlAuth0Interval && clearInterval(this.dhlAuth0Interval);
       //get adapter settings and set captcha to null
       if ((this.config.dhlCode && this.dhlLoginSuccess) || this.config.amzotp || this.config.amzResetCookies) {
         const adapterSettings = await this.getForeignObjectAsync('system.adapter.' + this.namespace);
@@ -3113,6 +3804,20 @@ class Parcel extends utils.Adapter {
   async onStateChange(id, state) {
     if (state) {
       if (!state.ack) {
+        if (id.split('.')[2] === 'auth' && id.split('.')[3] === 'dhlAuth0Session') {
+          try {
+            this.dhlAuth0 = this.parseDhlAuth0Import(state.val);
+            this.dhlAuth0Fehler = null;
+            if (await this.refreshDhlAuth0Session()) {
+              this.log.info('DHL Auth0-Sitzung importiert, Briefankündigung wird abgefragt');
+              this.briefePauseBis = 0;
+              this.updateProvider();
+            }
+          } catch (e) {
+            this.log.warn('DHL Auth0-Import ungültig: ' + (e && e.message));
+          }
+          return;
+        }
         if (id.split('.')[2] === 'refresh') {
           this.updateProvider();
           return;
@@ -3213,7 +3918,8 @@ class Parcel extends utils.Adapter {
             });
         }
       } else {
-        if (id.indexOf('dhl.briefe') !== -1 && id.indexOf('image_url') !== -1 && id.indexOf('oldAdvices') === -1) {
+        // 2026-10-07: Bilder auch für bereits zugestellte Briefe (oldAdvices) laden, Anzeige in Jarvis
+        if (id.indexOf('dhl.briefe') !== -1 && id.indexOf('image_url') !== -1) {
           let imageBase64 = this.images[state.val];
           if (!imageBase64) {
             // const image = await this.requestClient({

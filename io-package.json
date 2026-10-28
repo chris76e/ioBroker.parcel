@@ -1,7 +1,7 @@
 {
   "common": {
     "name": "parcel",
-    "version": "0.3.3-einzeln.1",
+    "version": "0.3.3-einzeln.2",
     "news": {
       "0.3.3": {
         "en": "Fix GLS states",
@@ -157,6 +157,8 @@
     ]
   },
   "encryptedNative": [
+    "dhlSsoCookies",
+    "dhlWebCookies",
     "amzpassword",
     "dpdpassword",
     "t17password",
@@ -168,6 +170,8 @@
     "aliPassword"
   ],
   "protectedNative": [
+    "dhlSsoCookies",
+    "dhlWebCookies",
     "amzpassword",
     "dpdpassword",
     "t17password",
@@ -209,6 +213,9 @@
     "dpdusername": "",
     "dpdpassword": "",
     "dhlCode": "",
+    "dhlWebLogin": false,
+    "dhlWebCookies": "",
+    "dhlSsoCookies": "",
     "17trackKey": "",
     "sendToActive": false,
     "t17QuotaNotification": false,
