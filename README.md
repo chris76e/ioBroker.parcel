@@ -57,6 +57,18 @@ The sent flag survives adapter restarts and resets once the quota returns to at 
 
 Enable in instance settings and enter e.g. `telegram.0`
 
+## Einzelnen Paketdienst neu anmelden (Fork chris76e)
+
+Unter `parcel.0.relogin` gibt es für jeden eingerichteten Dienst einen Knopf
+(`amazon`, `dhl`, `dpd`, `gls`, `ups`, `hermes`, `17tuser`, `17track`).
+Ein Druck meldet nur diesen Dienst neu an und ruft danach die Sendungen ab,
+die anderen Dienste bleiben angemeldet, der Adapter wird nicht neu gestartet.
+
+- `relogin.dhlCode`: neuen `dhllogin://` Code hier eintragen statt in den
+  Einstellungen (Einstellungen speichern startet den ganzen Adapter neu).
+- `relogin.amzOtp`: Amazon-Bestätigungscode (2FA/OTP) hier eintragen.
+- `relogin.dhl` ohne Code erneuert nur die gespeicherte DHL-Session.
+
 ## Vis
 
 **Show parcels in a Vis table**
@@ -81,6 +93,9 @@ Assign the datapoint `parcel.0.dhl.briefe....image` to a "String img src" elemen
 <https://forum.iobroker.net/topic/51795/test-adapter-parcel-paketverfolgung-dhl-v0-0-1>
 
 ## Changelog
+### 0.3.3-einzeln.1 (2026-10-28)
+- (chris76e) Knöpfe `relogin.<dienst>`, `relogin.dhlCode`, `relogin.amzOtp`: einzelnen Dienst neu anmelden ohne Adapter-Neustart
+
 ### 0.3.3 (2026-07-18)
 - Fix GLS states
 

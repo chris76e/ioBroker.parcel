@@ -24,6 +24,19 @@ const dhlDecrypt = require('./lib/dhldecrypt');
 const { loginDhlNew: dhlLoginNew } = require('./lib/dhlLogin');
 const { loginDPD: dpdLoginSoap, fetchDPDParcels: dpdFetchParcels } = require('./lib/dpdLogin');
 const { classifyGlsDeliveryStatus } = require('./lib/glsStatus');
+// Dienste, die einzeln neu angemeldet werden können (id = Schlüssel in this.sessions, state = Knopf unter relogin.)
+const PROVIDERS = [
+  { id: 'amz', state: 'amazon', name: 'Amazon' },
+  { id: 'dhl', state: 'dhl', name: 'DHL' },
+  { id: 'dpd', state: 'dpd', name: 'DPD' },
+  { id: '17tuser', state: '17tuser', name: '17Track User' },
+  { id: 'ali', state: '', name: 'AliExpress' }, // setzt keine Session, daher kein Knopf
+  { id: '17track', state: '17track', name: '17Track API' },
+  { id: 'gls', state: 'gls', name: 'GLS' },
+  { id: 'ups', state: 'ups', name: 'UPS' },
+  { id: 'hermes', state: 'hermes', name: 'Hermes' },
+];
+
 class Parcel extends utils.Adapter {
   /**
    * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -47,6 +60,7 @@ class Parcel extends utils.Adapter {
     this.alreadySentMessages = {};
     this.ignoredPath = [];
     this.firstStart = true;
+    this.reloginRunning = {};
     this.delivery_status = {
       ERROR: -1,
       UNKNOWN: 5,
@@ -100,87 +114,10 @@ class Parcel extends utils.Adapter {
         return Promise.reject(error);
       },
     );
-    if (this.config.amzActive !== false && this.config.amzusername && this.config.amzpassword) {
-      this.log.info('Login to Amazon');
-      await this.loginAmz();
+    for (const provider of PROVIDERS) {
+      await this.loginProvider(provider.id);
     }
-
-    if (this.config.dhlActive !== false) {
-      if (this.config.dhlCode && this.config.dhlCode.startsWith('dhllogin://')) {
-        this.log.info('Login to DHL via new dhllogin:// code');
-        await this.loginDhlNew();
-      } else {
-        const dhlSessionState = await this.getStateAsync('auth.dhlSession');
-        if (dhlSessionState && dhlSessionState.val) {
-          this.log.info('Use existing DHL session. If this fails please delete auth.dhlSession');
-          this.sessions['dhl'] = JSON.parse(String(dhlSessionState.val));
-          await this.refreshToken();
-          await this.createDHLStates();
-        }
-      }
-    }
-
-    if (this.config.dpdActive !== false && this.config.dpdusername && this.config.dpdpassword) {
-      const dpdSessionState = await this.getStateAsync('auth.dpdSession');
-      if (dpdSessionState && dpdSessionState.val) {
-        try {
-          const parsed = JSON.parse(String(dpdSessionState.val));
-          if (parsed && parsed.SessionToken && parsed.cloudUserID != null) {
-            this.log.info('Reuse existing DPD session (SessionFullState will verify).');
-            this.sessions['dpd'] = parsed;
-          }
-        } catch {
-          // fall through to fresh login
-        }
-      }
-      if (!this.sessions['dpd']) {
-        this.log.info('Login to DPD');
-        await this.loginDPD();
-      }
-    }
-    if (this.config.t17Active !== false && this.config.t17username && this.config.t17password) {
-      this.log.info('Login to T17 User');
-      await this.login17T();
-    }
-    if (this.config.aliUsername && this.config.aliPassword) {
-      this.log.info('Login to AliExpres');
-      await this.loginAli();
-    }
-
-    if (this.config.t17ApiActive !== false && this.config['17trackKey']) {
-      this.sessions['17track'] = this.config['17trackKey'];
-      this.login17TApi();
-      this.setState('info.connection', true, true);
-    }
-
-    if (this.config.glsActive !== false && this.config.glsusername && this.config.glspassword) {
-      const glsSessionState = await this.getStateAsync('auth.glsSession');
-      if (glsSessionState && glsSessionState.val) {
-        try {
-          const parsed = JSON.parse(String(glsSessionState.val));
-          if (parsed && parsed.refresh_token) {
-            this.log.info('Reuse existing GLS session, refresh token…');
-            this.sessions['gls'] = parsed;
-            this.glstoken = parsed.access_token;
-            await this.refreshGLSToken();
-          }
-        } catch {
-          // fall through to fresh login
-        }
-      }
-      if (!this.sessions['gls']) {
-        this.log.info('Login to GLS');
-        await this.loginGLS();
-      }
-    }
-    if (this.config.upsActive !== false && this.config.upsusername && this.config.upspassword) {
-      this.log.info('Login to UPS');
-      await this.loginUPS();
-    }
-    if (this.config.hermesActive !== false && this.config.hermesusername && this.config.hermespassword) {
-      this.log.info('Login to Hermes');
-      await this.loginHermes();
-    }
+    await this.createReloginStates();
 
     this.updateInterval = null;
     this.reLoginTimeout = null;
@@ -190,21 +127,268 @@ class Parcel extends utils.Adapter {
     if (Object.keys(this.sessions).length > 0) {
       this.log.debug('Starting updateProvider with sessions: ' + JSON.stringify(Object.keys(this.sessions)));
       await this.updateProvider();
-      this.updateInterval = setInterval(async () => {
-        this.firstStart = false;
-        await this.updateProvider();
-      }, this.config.interval * 60 * 1000);
-      this.refreshTokenInterval = setInterval(() => {
-        this.refreshToken();
-      }, 29 * 60 * 1000);
+      this.startIntervals();
     } else {
       this.log.warn('No login session found');
     }
   }
-  async loginDhlNew() {
+  startIntervals() {
+    if (!this.updateInterval) {
+      this.updateInterval = setInterval(async () => {
+        this.firstStart = false;
+        await this.updateProvider();
+      }, this.config.interval * 60 * 1000);
+    }
+    if (!this.refreshTokenInterval) {
+      this.refreshTokenInterval = setInterval(() => {
+        this.refreshToken();
+      }, 29 * 60 * 1000);
+    }
+  }
+  /**
+   * Anmeldung eines einzelnen Dienstes (wie beim Adapterstart).
+   * @param {string} id - Schlüssel aus PROVIDERS
+   * @param {{dhlCode?: string}} [options] - dhlCode: statt config.dhlCode verwenden ('' = vorhandene Session)
+   */
+  async loginProvider(id, options = {}) {
+    if (id === 'amz') {
+      if (this.config.amzActive !== false && this.config.amzusername && this.config.amzpassword) {
+        this.log.info('Login to Amazon');
+        await this.loginAmz();
+      }
+    }
+    if (id === 'dhl') {
+      if (this.config.dhlActive !== false) {
+        const dhlCode = options.dhlCode !== undefined ? options.dhlCode : this.config.dhlCode;
+        if (dhlCode && dhlCode.startsWith('dhllogin://')) {
+          this.log.info('Login to DHL via new dhllogin:// code');
+          await this.loginDhlNew(dhlCode);
+        } else {
+          const dhlSessionState = await this.getStateAsync('auth.dhlSession');
+          if (dhlSessionState && dhlSessionState.val) {
+            this.log.info('Use existing DHL session. If this fails please delete auth.dhlSession');
+            this.sessions['dhl'] = JSON.parse(String(dhlSessionState.val));
+            await this.refreshToken('dhl');
+            await this.createDHLStates();
+          }
+        }
+      }
+    }
+    if (id === 'dpd') {
+      if (this.config.dpdActive !== false && this.config.dpdusername && this.config.dpdpassword) {
+        const dpdSessionState = await this.getStateAsync('auth.dpdSession');
+        if (dpdSessionState && dpdSessionState.val) {
+          try {
+            const parsed = JSON.parse(String(dpdSessionState.val));
+            if (parsed && parsed.SessionToken && parsed.cloudUserID != null) {
+              this.log.info('Reuse existing DPD session (SessionFullState will verify).');
+              this.sessions['dpd'] = parsed;
+            }
+          } catch {
+            // fall through to fresh login
+          }
+        }
+        if (!this.sessions['dpd']) {
+          this.log.info('Login to DPD');
+          await this.loginDPD();
+        }
+      }
+    }
+    if (id === '17tuser') {
+      if (this.config.t17Active !== false && this.config.t17username && this.config.t17password) {
+        this.log.info('Login to T17 User');
+        await this.login17T();
+      }
+    }
+    if (id === 'ali') {
+      if (this.config.aliUsername && this.config.aliPassword) {
+        this.log.info('Login to AliExpres');
+        await this.loginAli();
+      }
+    }
+    if (id === '17track') {
+      if (this.config.t17ApiActive !== false && this.config['17trackKey']) {
+        this.sessions['17track'] = this.config['17trackKey'];
+        this.login17TApi();
+        this.setState('info.connection', true, true);
+      }
+    }
+    if (id === 'gls') {
+      if (this.config.glsActive !== false && this.config.glsusername && this.config.glspassword) {
+        const glsSessionState = await this.getStateAsync('auth.glsSession');
+        if (glsSessionState && glsSessionState.val) {
+          try {
+            const parsed = JSON.parse(String(glsSessionState.val));
+            if (parsed && parsed.refresh_token) {
+              this.log.info('Reuse existing GLS session, refresh token…');
+              this.sessions['gls'] = parsed;
+              this.glstoken = parsed.access_token;
+              await this.refreshGLSToken();
+            }
+          } catch {
+            // fall through to fresh login
+          }
+        }
+        if (!this.sessions['gls']) {
+          this.log.info('Login to GLS');
+          await this.loginGLS();
+        }
+      }
+    }
+    if (id === 'ups') {
+      if (this.config.upsActive !== false && this.config.upsusername && this.config.upspassword) {
+        this.log.info('Login to UPS');
+        await this.loginUPS();
+      }
+    }
+    if (id === 'hermes') {
+      if (this.config.hermesActive !== false && this.config.hermesusername && this.config.hermespassword) {
+        this.log.info('Login to Hermes');
+        await this.loginHermes();
+      }
+    }
+  }
+  /**
+   * Ist der Dienst in den Einstellungen eingerichtet?
+   * @param {string} id - Schlüssel aus PROVIDERS
+   */
+  isProviderConfigured(id) {
+    const c = this.config;
+    switch (id) {
+      case 'amz':
+        return c.amzActive !== false && !!c.amzusername && !!c.amzpassword;
+      case 'dhl':
+        return c.dhlActive !== false;
+      case 'dpd':
+        return c.dpdActive !== false && !!c.dpdusername && !!c.dpdpassword;
+      case '17tuser':
+        return c.t17Active !== false && !!c.t17username && !!c.t17password;
+      case 'ali':
+        return !!c.aliUsername && !!c.aliPassword;
+      case '17track':
+        return c.t17ApiActive !== false && !!c['17trackKey'];
+      case 'gls':
+        return c.glsActive !== false && !!c.glsusername && !!c.glspassword;
+      case 'ups':
+        return c.upsActive !== false && !!c.upsusername && !!c.upspassword;
+      case 'hermes':
+        return c.hermesActive !== false && !!c.hermesusername && !!c.hermespassword;
+    }
+    return false;
+  }
+  /**
+   * Knöpfe relogin.<dienst> für alle eingerichteten Dienste anlegen,
+   * dazu relogin.dhlCode und relogin.amzOtp für neue Codes ohne Adapter-Neustart.
+   */
+  async createReloginStates() {
+    await this.setObjectNotExistsAsync('relogin', {
+      type: 'channel',
+      common: { name: 'Einzelnen Paketdienst neu anmelden' },
+      native: {},
+    });
+    for (const provider of PROVIDERS) {
+      if (!provider.state || !this.isProviderConfigured(provider.id)) continue;
+      await this.setObjectNotExistsAsync('relogin.' + provider.state, {
+        type: 'state',
+        common: {
+          role: 'button',
+          name: provider.name + ' neu anmelden und abrufen',
+          type: 'boolean',
+          read: false,
+          write: true,
+          def: false,
+        },
+        native: {},
+      });
+    }
+    if (this.isProviderConfigured('dhl')) {
+      await this.setObjectNotExistsAsync('relogin.dhlCode', {
+        type: 'state',
+        common: {
+          role: 'text',
+          name: 'Neuen dhllogin:// Code eintragen (meldet nur DHL neu an)',
+          type: 'string',
+          read: true,
+          write: true,
+          def: '',
+        },
+        native: {},
+      });
+    }
+    if (this.isProviderConfigured('amz')) {
+      await this.setObjectNotExistsAsync('relogin.amzOtp', {
+        type: 'state',
+        common: {
+          role: 'text',
+          name: 'Amazon-Bestätigungscode eintragen (meldet nur Amazon neu an)',
+          type: 'string',
+          read: true,
+          write: true,
+          def: '',
+        },
+        native: {},
+      });
+    }
+  }
+  /**
+   * Meldet nur einen Dienst neu an und ruft danach die Sendungen ab.
+   * Die anderen Dienste bleiben angemeldet.
+   * @param {string} id - Schlüssel aus PROVIDERS
+   * @param {{dhlCode?: string}} [options] - dhlCode: neuer dhllogin:// Code; ohne wird die gespeicherte DHL-Session erneuert
+   */
+  async reloginProvider(id, options = {}) {
+    const provider = PROVIDERS.find((p) => p.id === id);
+    if (!provider || !provider.state) return;
+    if (!this.isProviderConfigured(id)) {
+      this.log.warn(provider.name + ' ist in den Einstellungen nicht eingerichtet');
+      return;
+    }
+    if (this.reloginRunning[id]) {
+      this.log.info(provider.name + ': Neuanmeldung läuft schon');
+      return;
+    }
+    this.reloginRunning[id] = true;
+    try {
+      this.log.info(provider.name + ': Neuanmeldung per Knopf (andere Dienste bleiben angemeldet)');
+      delete this.sessions[id];
+      if (id === 'dpd') {
+        await this.clearDPDSession();
+      }
+      if (id === 'gls') {
+        this.glstoken = null;
+        await this.setStateAsync('auth.glsSession', '', true).catch(() => {});
+      }
+      if (id === 'hermes') {
+        this.hermesAuthToken = null;
+      }
+      if (id === 'dhl') {
+        this.ignoredPath = this.ignoredPath.filter((path) => !path.startsWith('dhl'));
+      }
+      // der Code aus den Einstellungen ist nach dem Adapterstart verbraucht
+      await this.loginProvider(id, { dhlCode: options.dhlCode || '' });
+      if (this.sessions[id]) {
+        this.log.info(provider.name + ': Neuanmeldung fertig, rufe Sendungen ab');
+        this.startIntervals();
+        await this.updateProvider();
+      } else {
+        this.log.warn(provider.name + ': Neuanmeldung fehlgeschlagen, siehe Meldungen davor');
+        if (id === 'dhl' && !options.dhlCode) {
+          this.log.warn('DHL: Ohne gültige Session bitte einen neuen dhllogin:// Code in relogin.dhlCode eintragen');
+        }
+      }
+    } catch (error) {
+      this.logAxiosError(provider.name + '/relogin', error);
+    } finally {
+      this.reloginRunning[id] = false;
+    }
+  }
+  /**
+   * @param {string} [dhlCode] - Code statt config.dhlCode
+   */
+  async loginDhlNew(dhlCode) {
     const sessionData = await dhlLoginNew({
       requestClient: this.requestClient.bind(this),
-      dhlCode: this.config.dhlCode,
+      dhlCode: dhlCode || this.config.dhlCode,
       log: this.log,
     });
     if (!sessionData) {
@@ -2736,12 +2920,16 @@ class Parcel extends utils.Adapter {
       });
   }
 
-  async refreshToken() {
+  /**
+   * @param {string} [onlyId] - nur diesen Dienst erneuern (sonst alle)
+   */
+  async refreshToken(onlyId) {
     if (Object.keys(this.sessions).length === 0) {
       this.log.error('No session found relogin');
       return;
     }
     for (const id of Object.keys(this.sessions)) {
+      if (onlyId && id !== onlyId) continue;
       if (id === 'dhl') {
         await this.requestClient({
           method: 'post',
@@ -2927,6 +3115,35 @@ class Parcel extends utils.Adapter {
       if (!state.ack) {
         if (id.split('.')[2] === 'refresh') {
           this.updateProvider();
+          return;
+        }
+        if (id.split('.')[2] === 'relogin') {
+          const command = id.split('.')[3];
+          if (command === 'dhlCode') {
+            const code = String(state.val || '').trim();
+            if (!code.startsWith('dhllogin://')) {
+              this.log.error('DHL: der Code muss mit dhllogin:// beginnen');
+              return;
+            }
+            await this.setStateAsync(id, '', true);
+            await this.reloginProvider('dhl', { dhlCode: code });
+            return;
+          }
+          if (command === 'amzOtp') {
+            const code = String(state.val || '').trim();
+            if (!code) return;
+            const oldOtp = this.config.amzotp;
+            this.config.amzotp = code;
+            await this.setStateAsync(id, '', true);
+            await this.reloginProvider('amz');
+            this.config.amzotp = oldOtp;
+            return;
+          }
+          const provider = PROVIDERS.find((p) => p.state && p.state === command);
+          if (provider && state.val) {
+            await this.setStateAsync(id, false, true);
+            await this.reloginProvider(provider.id);
+          }
           return;
         }
         if (id.split('.')[2] === '17t') {

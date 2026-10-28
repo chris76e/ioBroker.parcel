@@ -1,7 +1,7 @@
 {
   "common": {
     "name": "parcel",
-    "version": "0.3.3",
+    "version": "0.3.3-einzeln.1",
     "news": {
       "0.3.3": {
         "en": "Fix GLS states",
