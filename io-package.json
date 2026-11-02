@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "parcel",
-    "version": "0.3.3-einzeln.4",
+    "version": "0.3.3-einzeln.5",
     "news": {
+      "0.3.3-einzeln.5": {
+        "en": "DHL: delivery window without seconds, empty windows and '0 stops' removed; Amazon: more status fallbacks; Amazon and carrier with the same tracking number are counted once",
+        "de": "DHL: Zeitfenster ohne Sekunden, leere Fenster und '0 Stopps' entfallen; Amazon: weitere Status-Rückfälle; Amazon und Zusteller mit gleicher Sendungsnummer zählen einmal"
+      },
       "0.3.3-einzeln.4": {
         "en": "Amazon: delayed shipments (new delivery date) count as in transit instead of unknown",
         "de": "Amazon: verspätete Sendungen (neues Lieferdatum) gelten als unterwegs statt unbekannt"

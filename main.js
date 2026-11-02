@@ -30,6 +30,7 @@ const dhlDecrypt = require('./lib/dhldecrypt');
 const { loginDhlNew: dhlLoginNew } = require('./lib/dhlLogin');
 const { loginDPD: dpdLoginSoap, fetchDPDParcels: dpdFetchParcels } = require('./lib/dpdLogin');
 const { classifyGlsDeliveryStatus } = require('./lib/glsStatus');
+const { amazonStatus, dhlStatusText, ohneDoppelte } = require('./lib/einzeln');
 // Wartezeit bis zum nächsten Abruf der Briefankündigung nach einem DHL-Fehler
 const BRIEFE_PAUSE_MIN = 60;
 
@@ -2205,6 +2206,10 @@ class Parcel extends utils.Adapter {
       }
     }
     this.log.debug('Write states');
+    // Amazon + Zusteller mit gleicher Sendungsnummer nur einmal zählen (allProviderJson bleibt vollständig)
+    const eindeutig = ohneDoppelte(this.notDelivered, this.inDelivery, this.mergedJson, this.delivery_status);
+    this.notDelivered = eindeutig.notDelivered;
+    this.inDelivery = eindeutig.inDelivery;
     this.setState('allProviderJson', JSON.stringify(this.mergedJson), true);
     this.setState('allProviderObjects', JSON.stringify(this.mergedJsonObject), true);
     this.setState('inDelivery', JSON.stringify(this.inDelivery), true);
@@ -2256,23 +2261,8 @@ class Parcel extends utils.Adapter {
     this.log.debug(id + ' merge provider json');
     if (id === 'dhl' && data.sendungen) {
       const sendungsArray = data.sendungen.map((sendung) => {
-        let status = '';
-
-        if (sendung.sendungsdetails && sendung.sendungsdetails.sendungsverlauf && (sendung.sendungsdetails.sendungsverlauf.kurzStatus || sendung.sendungsdetails.sendungsverlauf.status)) {
-          status = sendung.sendungsdetails.sendungsverlauf.kurzStatus || sendung.sendungsdetails.sendungsverlauf.status;
-        }
-        if (sendung.sendungsdetails && sendung.sendungsdetails.liveTracking) {
-          let stopps = 0;
-          if (sendung.sendungsdetails.liveTracking && sendung.sendungsdetails.liveTracking.countdown) {
-            stopps = sendung.sendungsdetails.liveTracking.countdown;
-          }
-          status = status + ' ' + stopps + ' Stopps';
-        }
-        if (sendung.sendungsdetails && sendung.sendungsdetails.zustellung && sendung.sendungsdetails.zustellung.zustellzeitfensterBis) {
-          const bisDate = new Date(sendung.sendungsdetails.zustellung.zustellzeitfensterBis).toLocaleTimeString('de-DE');
-          const vonDate = new Date(sendung.sendungsdetails.zustellung.zustellzeitfensterVon).toLocaleTimeString('de-DE');
-          status = status + ' ' + vonDate + '-' + bisDate;
-        }
+        // Status mit Zeitfenster "13:20 - 14:50" und Stopps nur bei echtem Zähler (lib/einzeln.js)
+        const status = dhlStatusText(sendung);
         const name = sendung.sendungsinfo.sendungsname || 'Unbekannt';
 
         const sendungsObject = { id: sendung.id, name: name, status: status, source: 'DHL' };
@@ -2691,27 +2681,24 @@ class Parcel extends utils.Adapter {
             return glsStatus;
           }
         }
-        if (id === 'amz' && sendung.detailedState && sendung.detailedState.shortStatus) {
-          const amz_status = {
-            ORDER_PLACED: this.delivery_status.REGISTERED, //ORDERED
-            SHIPPING_SOON: this.delivery_status.IN_PREPARATION,
-            IN_TRANSIT: this.delivery_status.IN_TRANSIT,
-            OUT_FOR_DELIVERY: this.delivery_status.OUT_FOR_DELIVERY,
-            DELIVERED: this.delivery_status.DELIVERED,
-            PICKED_UP: this.delivery_status.DELIVERED,
-            DELAYED: this.delivery_status.IN_TRANSIT,
-          };
-          if (amz_status[sendung.detailedState.shortStatus] !== undefined) {
-            return amz_status[sendung.detailedState.shortStatus];
+        if (id === 'amz' && sendung.detailedState) {
+          // shortStatus, sonst Statustext (Storno/Rücksendung, Verspätung), sonst Meilenstein (lib/einzeln.js)
+          const amz = amazonStatus(sendung);
+          if (amz.grund !== 'shortStatus') {
+            const kurz = String(sendung.detailedState.shortStatus || '');
+            this.amzUnbekannt = this.amzUnbekannt || new Set();
+            const merk = kurz + '|' + amz.grund;
+            const text = `Amazon: shortStatus "${kurz}" nicht in der Liste -> ${amz.status || 'unbekannt'} (${amz.grund}): ${sendung.status || ''}`;
+            if (!this.amzUnbekannt.has(merk)) {
+              this.amzUnbekannt.add(merk);
+              this.log.info(text);
+            } else {
+              this.log.debug(text);
+            }
           }
-          // Verspätung ("Neues Lieferdatum: Donnerstag. Zuvor erwartet am 2. November …"): Amazon schickt dafür einen
-          // anderen shortStatus. Die Sendung ist weiter unterwegs, nicht "unbekannt".
-          const amzText = String((sendungsObject && sendungsObject.status) || sendung.status || '').toLowerCase();
-          if (/neues lieferdatum|zuvor erwartet|verzöger|verspät/.test(amzText)) {
-            this.log.debug(`Amazon: shortStatus "${sendung.detailedState.shortStatus}" mit Verspätung -> unterwegs`);
-            return this.delivery_status.IN_TRANSIT;
+          if (amz.status && this.delivery_status[amz.status] !== undefined) {
+            return this.delivery_status[amz.status];
           }
-          this.log.debug(`Amazon: unbekannter shortStatus "${sendung.detailedState.shortStatus}" (${amzText})`);
         }
         if (id === '17track' && sendung.track) {
           // 17TRACK API v1: track.e is the package status; 40 means delivered.

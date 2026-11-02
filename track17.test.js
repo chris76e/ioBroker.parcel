@@ -10,7 +10,12 @@ const path = require('node:path');
 // unrelated provider dependencies. All network and state I/O is supplied below.
 const source = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
 const context = {
-  require: (id) => id === 'crypto' ? require('node:crypto') : { Adapter: class {}, default: {} },
+  require: (id) => {
+    if (id === 'crypto') return require('node:crypto');
+    // reine Hilfsfunktionen ohne Abhängigkeiten echt laden (Fork chris76e: Doppelte zusammenfassen)
+    if (id === './lib/einzeln') return require('./lib/einzeln');
+    return { Adapter: class {}, default: {} };
+  },
   module: { exports: {} },
 };
 vm.runInNewContext(source + '\nmodule.exports = Parcel.prototype;', context);
