@@ -126,6 +126,14 @@ describe('Dienst-Übersicht im Log (Fork chris76e)', () => {
       'Dienste nach dem Start: Amazon ✓ angemeldet, 10 Sendungen · DHL ✓ angemeldet, 1 Sendung · DPD ✗ angemeldet, aber Abruf fehlgeschlagen · GLS ✗ nicht angemeldet',
     );
   });
+  it('DHL mit Briefankündigung ok bzw. Fehler', () => {
+    expect(dienstUebersicht('nach dem Start', [{ name: 'DHL', angemeldet: true, abruf: true, anzahl: 1, briefe: 'ok' }])).to.equal(
+      'Dienste nach dem Start: DHL ✓ angemeldet, 1 Sendung, Briefankündigung ✓',
+    );
+    expect(dienstUebersicht('nach dem Start', [{ name: 'DHL', angemeldet: true, abruf: true, anzahl: 0, briefe: 'HTTP 500: Service nicht verfügbar' }])).to.equal(
+      'Dienste nach dem Start: DHL ✓ angemeldet, 0 Sendungen, Briefankündigung ✗ HTTP 500: Service nicht verfügbar',
+    );
+  });
   it('keine Dienste', () => {
     expect(dienstUebersicht('nach dem Start', [])).to.equal('Dienste nach dem Start: keiner eingerichtet');
   });

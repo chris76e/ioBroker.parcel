@@ -117,11 +117,12 @@ describe('Dienst-Übersicht nach Start/Neuanmeldung', () => {
     a.config = { amzActive: true, amzusername: 'u', amzpassword: 'p', dhlActive: true, dpdActive: true, dpdusername: 'u', dpdpassword: 'p', glsActive: false };
     a.sessions = { amz: true, dhl: {}, dpd: true };
     a.abrufOk = new Set(['amz', 'dhl']);
+    a.briefeAbruf = 'ok';
     a.mergedJson = [{ source: 'AMZ' }, { source: 'AMZ' }, { source: 'DHL' }];
     a.dienstStandLoggen('nach dem Start');
     assert.equal(
       zeilen[0],
-      'Dienste nach dem Start: Amazon ✓ angemeldet, 2 Sendungen · DHL ✓ angemeldet, 1 Sendung · DPD ✗ angemeldet, aber Abruf fehlgeschlagen',
+      'Dienste nach dem Start: Amazon ✓ angemeldet, 2 Sendungen · DHL ✓ angemeldet, 1 Sendung, Briefankündigung ✓ · DPD ✗ angemeldet, aber Abruf fehlgeschlagen',
     );
   });
 });

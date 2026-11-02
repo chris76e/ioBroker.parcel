@@ -182,6 +182,8 @@ class Parcel extends utils.Adapter {
       angemeldet: !!this.sessions[p.id],
       abruf: ok.has(p.id),
       anzahl: (this.mergedJson || []).filter((s) => s && s.source === quelle[p.id]).length,
+      // DHL: Stand der Briefankündigung (nur wenn sie in diesem Abruf dran war)
+      briefe: p.id === 'dhl' && this.briefeAbruf ? this.briefeAbruf : undefined,
     }));
     this.log.info(dienstUebersicht(anlass, dienste));
   }
@@ -1911,6 +1913,7 @@ class Parcel extends utils.Adapter {
     this.inDelivery = [];
     this.notDelivered = [];
     this.abrufOk = new Set();
+    this.briefeAbruf = null; // Briefankündigung in diesem Abruf: 'ok', Fehlertext oder null (nicht abgefragt)
     if (this.sessions['17track']) await this.update17TQuota();
     if (this.sessions['dhl']) {
       // Remove stale Akamai bot-detection cookies that cause ECONNRESET/ETIMEDOUT
@@ -2105,6 +2108,7 @@ class Parcel extends utils.Adapter {
         // Briefankündigung nach einem DHL-Fehler nur pausieren, nicht bis zum Neustart abschalten
         if (element.path === 'dhl.briefe' && this.briefePauseBis && Date.now() < this.briefePauseBis) {
           this.log.debug('Briefankündigung pausiert bis ' + new Date(this.briefePauseBis).toLocaleString());
+          this.briefeAbruf = 'pausiert nach Fehler (' + (this.briefeFehler || '?') + ')';
           continue;
         }
         await requestFn()
@@ -2167,6 +2171,7 @@ class Parcel extends utils.Adapter {
               }
               this.briefeFehler = null;
               this.briefePauseBis = 0;
+              this.briefeAbruf = 'ok';
               this.setState('info.briefeStatus', 'OK', true);
             }
             //activate briefe token
@@ -2213,6 +2218,7 @@ class Parcel extends utils.Adapter {
                   this.log.warn('Briefankündigung nicht verfügbar (' + fehler + '). Neuer Versuch alle ' + BRIEFE_PAUSE_MIN + ' Min, weitere gleiche Fehler nur im Debug-Log.');
                 }
                 this.briefeFehler = fehler;
+                this.briefeAbruf = fehler;
                 this.log.debug(element.url + ' ' + JSON.stringify(body));
                 return;
               }
