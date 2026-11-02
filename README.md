@@ -95,6 +95,9 @@ Assign the datapoint `parcel.0.dhl.briefe....image` to a "String img src" elemen
 ## Changelog
 Versionen mit „chris76e“ (früher „einzeln“) stammen aus dem Fork [chris76e/ioBroker.parcel](https://github.com/chris76e/ioBroker.parcel) und bauen auf 0.3.3 von TA2k auf.
 
+### 0.3.3-chris76e.8 (2026-11-02)
+- Amazon: Vor jeder Anmeldung mit Passwort steht im Log, warum sie nötig ist, zum Beispiel „Amazon-Anmeldung: Bestellseite verlangt Anmeldung“. Kommen mit der gespeicherten Sitzung keine Bestellungen, nennt die Meldung auch, welche Seite Amazon stattdessen geliefert hat.
+
 ### 0.3.3-chris76e.7 (2026-11-02)
 - Versionsbezeichnung „einzeln“ heißt jetzt „chris76e“; die Hilfsfunktionen des Forks liegen in `lib/chris76e.js` (Tests `chris76e.test.js`). Keine Änderung am Verhalten gegenüber 0.3.3-einzeln.6.
 

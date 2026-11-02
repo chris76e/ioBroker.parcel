@@ -2769,7 +2769,8 @@ class Parcel extends utils.Adapter {
    * @param {string} grund nur fürs Debug-Log
    */
   async amzAnmelden(grund) {
-    this.log.debug('Amazon-Anmeldung: ' + grund);
+    // Info statt Debug: so sieht man im normalen Log, warum neu angemeldet wurde
+    this.log.info('Amazon-Anmeldung: ' + grund);
     await this.loginAmz();
     this.amzAngemeldetUm = Date.now();
   }
@@ -2791,7 +2792,7 @@ class Parcel extends utils.Adapter {
       orders = await this.getAmazonOrders();
     }
     if (orders && orders.length === 0 && !(this.amzAngemeldetUm >= beginn)) {
-      await this.amzAnmelden('keine Bestellungen mit gespeicherter Sitzung');
+      await this.amzAnmelden('keine Bestellungen mit gespeicherter Sitzung (' + (this.amzLetzteSeite || '?') + ')');
       orders = await this.getAmazonOrders();
     }
     if (!orders) {
@@ -3012,6 +3013,9 @@ class Parcel extends utils.Adapter {
       .then(async (res) => {
         // this.log.debug(JSON.stringify(res.data));
         const dom = new JSDOM(res.data);
+        // Merker für die Meldung "keine Bestellungen": welche Seite kam zurück
+        const seitenUrl = String(res.request?.res?.responseUrl || res.request?.responseURL || '').split('?')[0];
+        this.amzLetzteSeite = 'Seite ' + (seitenUrl || '?') + ', Titel "' + String(dom.window.document.title || '').trim().slice(0, 60) + '"';
 
         if (res.data.includes('auth-workflow')) {
           this.log.debug('Amazon Login required');

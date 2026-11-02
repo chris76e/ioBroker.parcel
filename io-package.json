@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "parcel",
-    "version": "0.3.3-chris76e.7",
+    "version": "0.3.3-chris76e.8",
     "news": {
+      "0.3.3-chris76e.8": {
+        "en": "Amazon: the log shows why the adapter logs in again",
+        "de": "Amazon: Das Log zeigt, warum sich der Adapter neu anmeldet"
+      },
       "0.3.3-chris76e.7": {
         "en": "Fork chris76e: version suffix renamed from 'einzeln' to 'chris76e', no functional change",
         "de": "Fork chris76e: Versionsbezeichnung 'einzeln' heißt jetzt 'chris76e', keine Änderung am Verhalten"
