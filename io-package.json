@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "parcel",
-    "version": "0.3.3-einzeln.3",
+    "version": "0.3.3-einzeln.4",
     "news": {
+      "0.3.3-einzeln.4": {
+        "en": "Amazon: delayed shipments (new delivery date) count as in transit instead of unknown",
+        "de": "Amazon: verspätete Sendungen (neues Lieferdatum) gelten als unterwegs statt unbekannt"
+      },
       "0.3.3": {
         "en": "Fix GLS states",
         "de": "GLS-Zustände gefixt",

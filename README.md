@@ -93,6 +93,9 @@ Assign the datapoint `parcel.0.dhl.briefe....image` to a "String img src" elemen
 <https://forum.iobroker.net/topic/51795/test-adapter-parcel-paketverfolgung-dhl-v0-0-1>
 
 ## Changelog
+### 0.3.3-einzeln.4 (2026-11-02)
+- (chris76e) Amazon: Verspätete Sendungen („Neues Lieferdatum … Zuvor erwartet am …“) gelten als unterwegs (delivery_status 30) statt unbekannt (5); shortStatus `DELAYED` ergänzt, dazu Prüfung des Statustexts. Unbekannte shortStatus-Werte stehen im Debug-Log.
+
 ### 0.3.3-einzeln.3 (2026-10-28)
 - (chris76e) Amazon: Netzwerkfehler beim Login führen nicht mehr zum Adapter-Absturz (leere Antwort wird abgefangen, neuer Versuch beim nächsten Abruf); Fehler im Amazon-Abruf stoppen die anderen Dienste nicht mehr.
 

@@ -2699,10 +2699,19 @@ class Parcel extends utils.Adapter {
             OUT_FOR_DELIVERY: this.delivery_status.OUT_FOR_DELIVERY,
             DELIVERED: this.delivery_status.DELIVERED,
             PICKED_UP: this.delivery_status.DELIVERED,
+            DELAYED: this.delivery_status.IN_TRANSIT,
           };
           if (amz_status[sendung.detailedState.shortStatus] !== undefined) {
             return amz_status[sendung.detailedState.shortStatus];
           }
+          // Verspätung ("Neues Lieferdatum: Donnerstag. Zuvor erwartet am 2. November …"): Amazon schickt dafür einen
+          // anderen shortStatus. Die Sendung ist weiter unterwegs, nicht "unbekannt".
+          const amzText = String((sendungsObject && sendungsObject.status) || sendung.status || '').toLowerCase();
+          if (/neues lieferdatum|zuvor erwartet|verzöger|verspät/.test(amzText)) {
+            this.log.debug(`Amazon: shortStatus "${sendung.detailedState.shortStatus}" mit Verspätung -> unterwegs`);
+            return this.delivery_status.IN_TRANSIT;
+          }
+          this.log.debug(`Amazon: unbekannter shortStatus "${sendung.detailedState.shortStatus}" (${amzText})`);
         }
         if (id === '17track' && sendung.track) {
           // 17TRACK API v1: track.e is the package status; 40 means delivered.
