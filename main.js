@@ -31,8 +31,8 @@ const { loginDhlNew: dhlLoginNew } = require('./lib/dhlLogin');
 const { loginDPD: dpdLoginSoap, fetchDPDParcels: dpdFetchParcels } = require('./lib/dpdLogin');
 const { classifyGlsDeliveryStatus } = require('./lib/glsStatus');
 const { amazonStatus, dhlStatusText, ohneDoppelte, dienstUebersicht } = require('./lib/chris76e');
-// Amazon spätestens nach so vielen Stunden neu mit Passwort anmelden (sonst gespeicherte Cookies)
-const AMZ_ANMELDUNG_STD = 8;
+// Amazon: liegt die letzte Anmeldung weniger als so viele Minuten zurück (Start/Knopf), meldet der Abruf nicht noch einmal an
+const AMZ_ANMELDUNG_MIN = 5;
 // Wartezeit bis zum nächsten Abruf der Briefankündigung nach einem DHL-Fehler
 const BRIEFE_PAUSE_MIN = 60;
 
@@ -2799,8 +2799,7 @@ class Parcel extends utils.Adapter {
    * @param {string} grund nur fürs Debug-Log
    */
   async amzAnmelden(grund) {
-    // Info statt Debug: so sieht man im normalen Log, warum neu angemeldet wurde
-    this.log.info('Amazon-Anmeldung: ' + grund);
+    this.log.debug('Amazon-Anmeldung: ' + grund);
     await this.loginAmz();
     this.amzAngemeldetUm = Date.now();
   }
@@ -2809,20 +2808,14 @@ class Parcel extends utils.Adapter {
     const amzResult = { sendungen: [] };
     const beginn = Date.now();
 
-    // Nicht mehr bei jedem Abruf mit Passwort anmelden (vorher alle 30 min "Relogin to Amazon successful"),
-    // sondern mit den gespeicherten Cookies abrufen und nur neu anmelden, wenn
-    // - die letzte Anmeldung AMZ_ANMELDUNG_STD Stunden her ist,
-    // - die Bestellseite eine Anmeldung verlangt (auth-workflow, siehe getAmazonOrders) oder
-    // - mit der gespeicherten Sitzung keine einzige Bestellung kommt (abgemeldet, ohne dass Amazon das klar sagt).
-    if (!this.amzAngemeldetUm || beginn - this.amzAngemeldetUm >= AMZ_ANMELDUNG_STD * 3600 * 1000) {
-      await this.amzAnmelden('letzte Anmeldung älter als ' + AMZ_ANMELDUNG_STD + ' h');
+    // Amazon verlangt für die Bestellübersicht nach ca. 30 min wieder eine frische Anmeldung (geprüft 02.11.2026:
+    // Abruf mit gespeicherter Sitzung -> auth-workflow). Deshalb wie im Original vor jedem Abruf anmelden,
+    // nur nicht doppelt, wenn Start oder Knopf gerade erst angemeldet haben (AMZ_ANMELDUNG_MIN).
+    if (!this.amzAngemeldetUm || beginn - this.amzAngemeldetUm >= AMZ_ANMELDUNG_MIN * 60 * 1000) {
+      await this.amzAnmelden('Abruf');
     }
     let orders = await this.getAmazonOrders();
     if (!orders) {
-      orders = await this.getAmazonOrders();
-    }
-    if (orders && orders.length === 0 && !(this.amzAngemeldetUm >= beginn)) {
-      await this.amzAnmelden('keine Bestellungen mit gespeicherter Sitzung (' + (this.amzLetzteSeite || '?') + ')');
       orders = await this.getAmazonOrders();
     }
     if (!orders) {
@@ -3043,9 +3036,6 @@ class Parcel extends utils.Adapter {
       .then(async (res) => {
         // this.log.debug(JSON.stringify(res.data));
         const dom = new JSDOM(res.data);
-        // Merker für die Meldung "keine Bestellungen": welche Seite kam zurück
-        const seitenUrl = String(res.request?.res?.responseUrl || res.request?.responseURL || '').split('?')[0];
-        this.amzLetzteSeite = 'Seite ' + (seitenUrl || '?') + ', Titel "' + String(dom.window.document.title || '').trim().slice(0, 60) + '"';
 
         if (res.data.includes('auth-workflow')) {
           this.log.debug('Amazon Login required');

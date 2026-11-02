@@ -1,7 +1,7 @@
 'use strict';
 // @ts-nocheck
 
-// Amazon nicht mehr bei jedem Abruf mit Passwort anmelden (Fork chris76e)
+// Amazon-Anmeldung und Dienst-Übersicht (Fork chris76e)
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -50,62 +50,29 @@ function adapter(antworten) {
   return a;
 }
 
-describe('Amazon-Anmeldung nur bei Bedarf', () => {
-  it('erster Abruf meldet an, folgende Abrufe nutzen die Sitzung', async () => {
-    const a = adapter([[]]);
-    a.getAmazonOrders = async () => {
-      a.abrufe++;
-      return [{ desc: 'x', url: '/progress-tracker/package?orderId=1' }];
-    };
+describe('Amazon-Anmeldung', () => {
+  const liste = [{ desc: 'x', url: '/p?orderId=1' }];
+  it('meldet vor jedem Abruf an (Amazon verlangt das nach ca. 30 min)', async () => {
+    const a = adapter([liste]);
     await a.getAmazonPackages();
-    assert.equal(a.logins, 1);
+    a.amzAngemeldetUm = Date.now() - 30 * 60 * 1000;
     await a.getAmazonPackages();
-    await a.getAmazonPackages();
-    assert.equal(a.logins, 1);
-    assert.equal(a.abrufe, 3);
+    assert.equal(a.logins, 2);
   });
-
-  it('nach 8 Stunden wird neu angemeldet', async () => {
-    const a = adapter([[{ desc: 'x', url: '/p?orderId=1' }]]);
-    a.amzAngemeldetUm = Date.now() - 8 * 3600 * 1000 - 1000;
-    await a.getAmazonPackages();
-    assert.equal(a.logins, 1);
-    a.amzAngemeldetUm = Date.now() - 7 * 3600 * 1000;
-    await a.getAmazonPackages();
-    assert.equal(a.logins, 1);
-  });
-
-  it('Bestellseite verlangt Anmeldung -> einmal anmelden, zweiter Abruf liefert', async () => {
-    const a = adapter(['anmelden', [{ desc: 'x', url: '/p?orderId=1' }]]);
-    a.amzAngemeldetUm = Date.now() - 3600 * 1000;
-    await a.getAmazonPackages();
-    assert.equal(a.logins, 1);
-    assert.equal(a.abrufe, 2);
-    assert.ok(a.geschrieben);
-  });
-
-  it('leere Liste mit alter Sitzung -> neu anmelden und nochmal holen (keine leere Liste schreiben, wenn danach Bestellungen kommen)', async () => {
-    const a = adapter([[], [{ desc: 'x', url: '/p?orderId=1' }]]);
-    a.amzAngemeldetUm = Date.now() - 3600 * 1000;
-    await a.getAmazonPackages();
-    assert.equal(a.logins, 1);
-    assert.equal(a.abrufe, 2);
-  });
-
-  it('leere Liste direkt nach frischer Anmeldung -> keine zweite Anmeldung', async () => {
-    const a = adapter([[]]);
-    await a.getAmazonPackages();
-    assert.equal(a.logins, 1);
-    assert.equal(a.abrufe, 1);
-    assert.deepEqual(a.geschrieben, { sendungen: [] });
-  });
-
   it('Start/Knopf meldet an, der direkt folgende Abruf nicht noch einmal', async () => {
-    const a = adapter([[{ desc: 'x', url: '/p?orderId=1' }]]);
+    const a = adapter([liste]);
     a.config = { amzActive: true, amzusername: 'u', amzpassword: 'p' };
     await a.loginProvider('amz');
     await a.getAmazonPackages();
     assert.equal(a.logins, 1);
+  });
+  it('Bestellseite verlangt trotzdem Anmeldung -> anmelden, zweiter Abruf liefert', async () => {
+    const a = adapter(['anmelden', liste]);
+    a.amzAngemeldetUm = Date.now();
+    await a.getAmazonPackages();
+    assert.equal(a.logins, 1);
+    assert.equal(a.abrufe, 2);
+    assert.ok(a.geschrieben);
   });
 });
 
