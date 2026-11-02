@@ -93,6 +93,9 @@ Assign the datapoint `parcel.0.dhl.briefe....image` to a "String img src" elemen
 <https://forum.iobroker.net/topic/51795/test-adapter-parcel-paketverfolgung-dhl-v0-0-1>
 
 ## Changelog
+### 0.3.3-einzeln.6 (2026-11-02)
+- (chris76e) Amazon: Nicht mehr bei jedem Abruf mit Passwort anmelden (vorher alle 30 min „Relogin to Amazon successful“, auch nach dem Knopf eines anderen Dienstes). Abruf mit den gespeicherten Cookies; neu angemeldet wird nach 8 Stunden (`AMZ_ANMELDUNG_STD`), wenn die Bestellseite eine Anmeldung verlangt oder wenn mit der gespeicherten Sitzung keine Bestellung kommt. Start/Knopf melden an, der direkt folgende Abruf nicht noch einmal. Tests: `amazonAnmeldung.test.js`.
+
 ### 0.3.3-einzeln.5 (2026-11-02)
 - (chris76e) DHL: Zeitfenster als „13:20 - 14:50“ in deutscher Zeit (vorher mit Sekunden, z. B. „13:20:00-14:50:00“); leere Fenster (zweimal Mitternacht, „01:00:00-01:00:00“) entfallen; „· 3 Stopps“ nur noch bei einem Zähler > 0 (vorher immer „0 Stopps“, sobald DHL Live-Tracking meldet).
 - (chris76e) Amazon: Status in dieser Reihenfolge: bekannter `shortStatus` (neu: `DELAYED`, `CANCELLED`, `RETURNED`, `RETURNING`), Statustext Storno/Rücksendung (Endstatus wie DPD `RETURN_TO_SENDER`), Statustext Verspätung (unterwegs), zuletzt erreichter Meilenstein (`progressTracker.lastReachedMilestone`). Ein nicht gelisteter `shortStatus` steht einmal je Adapterstart als Info im Log (z. B. `NO_INFORMATION_AVAILABLE` bei Verspätung).

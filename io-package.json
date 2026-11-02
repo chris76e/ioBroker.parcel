@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "parcel",
-    "version": "0.3.3-einzeln.5",
+    "version": "0.3.3-einzeln.6",
     "news": {
+      "0.3.3-einzeln.6": {
+        "en": "Amazon: password login only every 8 hours or when Amazon asks for it, otherwise stored cookies",
+        "de": "Amazon: Anmeldung mit Passwort nur noch alle 8 Stunden oder wenn Amazon sie verlangt, sonst gespeicherte Cookies"
+      },
       "0.3.3-einzeln.5": {
         "en": "DHL: delivery window without seconds, empty windows and '0 stops' removed; Amazon: more status fallbacks; Amazon and carrier with the same tracking number are counted once",
         "de": "DHL: Zeitfenster ohne Sekunden, leere Fenster und '0 Stopps' entfallen; Amazon: weitere Status-Rückfälle; Amazon und Zusteller mit gleicher Sendungsnummer zählen einmal"

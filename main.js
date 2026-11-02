@@ -31,6 +31,8 @@ const { loginDhlNew: dhlLoginNew } = require('./lib/dhlLogin');
 const { loginDPD: dpdLoginSoap, fetchDPDParcels: dpdFetchParcels } = require('./lib/dpdLogin');
 const { classifyGlsDeliveryStatus } = require('./lib/glsStatus');
 const { amazonStatus, dhlStatusText, ohneDoppelte } = require('./lib/einzeln');
+// Amazon spätestens nach so vielen Stunden neu mit Passwort anmelden (sonst gespeicherte Cookies)
+const AMZ_ANMELDUNG_STD = 8;
 // Wartezeit bis zum nächsten Abruf der Briefankündigung nach einem DHL-Fehler
 const BRIEFE_PAUSE_MIN = 60;
 
@@ -201,7 +203,7 @@ class Parcel extends utils.Adapter {
     if (id === 'amz') {
       if (this.config.amzActive !== false && this.config.amzusername && this.config.amzpassword) {
         this.log.info('Login to Amazon');
-        await this.loginAmz();
+        await this.amzAnmelden('Start/Knopf');
       }
     }
     if (id === 'dhl') {
@@ -2761,13 +2763,35 @@ class Parcel extends utils.Adapter {
         error.response && this.log.error(JSON.stringify(error.response.data));
       });
   }
+  /**
+   * Amazon mit Passwort anmelden und den Zeitpunkt merken (Fork chris76e).
+   *
+   * @param {string} grund nur fürs Debug-Log
+   */
+  async amzAnmelden(grund) {
+    this.log.debug('Amazon-Anmeldung: ' + grund);
+    await this.loginAmz();
+    this.amzAngemeldetUm = Date.now();
+  }
   async getAmazonPackages() {
     this.log.debug('Get Amazon Packages');
     const amzResult = { sendungen: [] };
+    const beginn = Date.now();
 
-    await this.loginAmz();
+    // Nicht mehr bei jedem Abruf mit Passwort anmelden (vorher alle 30 min "Relogin to Amazon successful"),
+    // sondern mit den gespeicherten Cookies abrufen und nur neu anmelden, wenn
+    // - die letzte Anmeldung AMZ_ANMELDUNG_STD Stunden her ist,
+    // - die Bestellseite eine Anmeldung verlangt (auth-workflow, siehe getAmazonOrders) oder
+    // - mit der gespeicherten Sitzung keine einzige Bestellung kommt (abgemeldet, ohne dass Amazon das klar sagt).
+    if (!this.amzAngemeldetUm || beginn - this.amzAngemeldetUm >= AMZ_ANMELDUNG_STD * 3600 * 1000) {
+      await this.amzAnmelden('letzte Anmeldung älter als ' + AMZ_ANMELDUNG_STD + ' h');
+    }
     let orders = await this.getAmazonOrders();
     if (!orders) {
+      orders = await this.getAmazonOrders();
+    }
+    if (orders && orders.length === 0 && !(this.amzAngemeldetUm >= beginn)) {
+      await this.amzAnmelden('keine Bestellungen mit gespeicherter Sitzung');
       orders = await this.getAmazonOrders();
     }
     if (!orders) {
@@ -2992,7 +3016,7 @@ class Parcel extends utils.Adapter {
         if (res.data.includes('auth-workflow')) {
           this.log.debug('Amazon Login required');
           this.log.debug(res.data);
-          await this.loginAmz();
+          await this.amzAnmelden('Bestellseite verlangt Anmeldung');
           return;
         }
         const document = dom.window.document;
