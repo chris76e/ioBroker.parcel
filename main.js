@@ -30,7 +30,7 @@ const dhlDecrypt = require('./lib/dhldecrypt');
 const { loginDhlNew: dhlLoginNew } = require('./lib/dhlLogin');
 const { loginDPD: dpdLoginSoap, fetchDPDParcels: dpdFetchParcels } = require('./lib/dpdLogin');
 const { classifyGlsDeliveryStatus } = require('./lib/glsStatus');
-const { amazonStatus, dhlStatusText, ohneDoppelte } = require('./lib/chris76e');
+const { amazonStatus, dhlStatusText, ohneDoppelte, dienstUebersicht } = require('./lib/chris76e');
 // Amazon spätestens nach so vielen Stunden neu mit Passwort anmelden (sonst gespeicherte Cookies)
 const AMZ_ANMELDUNG_STD = 8;
 // Wartezeit bis zum nächsten Abruf der Briefankündigung nach einem DHL-Fehler
@@ -163,9 +163,27 @@ class Parcel extends utils.Adapter {
       this.log.debug('Starting updateProvider with sessions: ' + JSON.stringify(Object.keys(this.sessions)));
       await this.updateProvider();
       this.startIntervals();
+      this.dienstStandLoggen('nach dem Start');
     } else {
       this.log.warn('No login session found');
+      this.dienstStandLoggen('nach dem Start');
     }
+  }
+  /**
+   * Stand jedes eingerichteten Dienstes als eine Info-Zeile (angemeldet? letzter Abruf ok? Anzahl Sendungen)
+   *
+   * @param {string} anlass z. B. "nach dem Start"
+   */
+  dienstStandLoggen(anlass) {
+    const quelle = { amz: 'AMZ', dhl: 'DHL', dpd: 'DPD', gls: 'GLS', ups: 'UPS', hermes: 'Hermes', '17track': '17track', '17tuser': '17tuser' };
+    const ok = this.abrufOk || new Set();
+    const dienste = PROVIDERS.filter((p) => p.id !== 'ali' && this.isProviderConfigured(p.id)).map((p) => ({
+      name: p.name,
+      angemeldet: !!this.sessions[p.id],
+      abruf: ok.has(p.id),
+      anzahl: (this.mergedJson || []).filter((s) => s && s.source === quelle[p.id]).length,
+    }));
+    this.log.info(dienstUebersicht(anlass, dienste));
   }
   startIntervals() {
     if (!this.updateInterval) {
@@ -444,6 +462,7 @@ class Parcel extends utils.Adapter {
         this.log.info(provider.name + ': Neuanmeldung fertig, rufe Sendungen ab');
         this.startIntervals();
         await this.updateProvider();
+        this.dienstStandLoggen('nach Neuanmeldung ' + provider.name);
       } else {
         this.log.warn(provider.name + ': Neuanmeldung fehlgeschlagen, siehe Meldungen davor');
         if (id === 'dhl' && !options.dhlCode) {
@@ -1891,6 +1910,7 @@ class Parcel extends utils.Adapter {
     this.mergedJsonObject = {};
     this.inDelivery = [];
     this.notDelivered = [];
+    this.abrufOk = new Set();
     if (this.sessions['17track']) await this.update17TQuota();
     if (this.sessions['dhl']) {
       // Remove stale Akamai bot-detection cookies that cause ECONNRESET/ETIMEDOUT
@@ -2261,6 +2281,10 @@ class Parcel extends utils.Adapter {
   }
   async mergeProviderJson(id, data) {
     this.log.debug(id + ' merge provider json');
+    // für die Übersicht "Dienste nach dem Start": Sendungsliste dieses Dienstes kam an
+    if (data && (Array.isArray(data.sendungen) || (id === '17track' && data.accepted) || id === '17tuser')) {
+      (this.abrufOk = this.abrufOk || new Set()).add(id);
+    }
     if (id === 'dhl' && data.sendungen) {
       const sendungsArray = data.sendungen.map((sendung) => {
         // Status mit Zeitfenster "13:20 - 14:50" und Stopps nur bei echtem Zähler (lib/chris76e.js)

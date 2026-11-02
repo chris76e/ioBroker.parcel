@@ -2,7 +2,7 @@
 // @ts-nocheck
 
 const { expect } = require('chai');
-const { amazonStatus, dhlStatusText, ohneDoppelte } = require('./lib/chris76e');
+const { amazonStatus, dhlStatusText, ohneDoppelte, dienstUebersicht } = require('./lib/chris76e');
 
 const ds = { ERROR: -1, UNKNOWN: 5, REGISTERED: 10, IN_PREPARATION: 20, IN_TRANSIT: 30, OUT_FOR_DELIVERY: 40, DELIVERED: 1 };
 const amz = (shortStatus, status, meilenstein) => ({
@@ -111,5 +111,22 @@ describe('Doppelte Sendungsnummern (Fork chris76e)', () => {
     const r = ohneDoppelte(offen(alle), inZ(alle), alle, ds);
     expect(r.notDelivered).to.have.length(3);
     expect(r.notDelivered[0]).to.equal(alle[0]);
+  });
+});
+
+describe('Dienst-Übersicht im Log (Fork chris76e)', () => {
+  it('angemeldet mit Anzahl, Abruf fehlgeschlagen, nicht angemeldet', () => {
+    const t = dienstUebersicht('nach dem Start', [
+      { name: 'Amazon', angemeldet: true, abruf: true, anzahl: 10 },
+      { name: 'DHL', angemeldet: true, abruf: true, anzahl: 1 },
+      { name: 'DPD', angemeldet: true, abruf: false, anzahl: 0 },
+      { name: 'GLS', angemeldet: false, abruf: false, anzahl: 0 },
+    ]);
+    expect(t).to.equal(
+      'Dienste nach dem Start: Amazon ✓ angemeldet, 10 Sendungen · DHL ✓ angemeldet, 1 Sendung · DPD ✗ angemeldet, aber Abruf fehlgeschlagen · GLS ✗ nicht angemeldet',
+    );
+  });
+  it('keine Dienste', () => {
+    expect(dienstUebersicht('nach dem Start', [])).to.equal('Dienste nach dem Start: keiner eingerichtet');
   });
 });

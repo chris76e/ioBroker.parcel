@@ -95,6 +95,9 @@ Assign the datapoint `parcel.0.dhl.briefe....image` to a "String img src" elemen
 ## Changelog
 Versionen mit „chris76e“ (früher „einzeln“) stammen aus dem Fork [chris76e/ioBroker.parcel](https://github.com/chris76e/ioBroker.parcel) und bauen auf 0.3.3 von TA2k auf.
 
+### 0.3.3-chris76e.9 (2026-11-02)
+- Log: Nach dem Start und nach jeder Neuanmeldung eines Dienstes steht eine Zeile mit dem Stand aller eingerichteten Dienste, zum Beispiel „Dienste nach dem Start: Amazon ✓ angemeldet, 10 Sendungen · DHL ✓ angemeldet, 1 Sendung · DPD ✓ angemeldet, 0 Sendungen“. Ist ein Dienst nicht angemeldet oder hat sein Abruf nicht geklappt, steht dort ✗ mit dem Grund.
+
 ### 0.3.3-chris76e.8 (2026-11-02)
 - Amazon: Vor jeder Anmeldung mit Passwort steht im Log, warum sie nötig ist, zum Beispiel „Amazon-Anmeldung: Bestellseite verlangt Anmeldung“. Kommen mit der gespeicherten Sitzung keine Bestellungen, nennt die Meldung auch, welche Seite Amazon stattdessen geliefert hat.
 

@@ -108,3 +108,20 @@ describe('Amazon-Anmeldung nur bei Bedarf', () => {
     assert.equal(a.logins, 1);
   });
 });
+
+describe('Dienst-Übersicht nach Start/Neuanmeldung', () => {
+  it('nimmt nur eingerichtete Dienste und zählt Sendungen je Quelle', () => {
+    const a = Object.create(prototype);
+    const zeilen = [];
+    a.log = { info: (m) => zeilen.push(m), debug() {} };
+    a.config = { amzActive: true, amzusername: 'u', amzpassword: 'p', dhlActive: true, dpdActive: true, dpdusername: 'u', dpdpassword: 'p', glsActive: false };
+    a.sessions = { amz: true, dhl: {}, dpd: true };
+    a.abrufOk = new Set(['amz', 'dhl']);
+    a.mergedJson = [{ source: 'AMZ' }, { source: 'AMZ' }, { source: 'DHL' }];
+    a.dienstStandLoggen('nach dem Start');
+    assert.equal(
+      zeilen[0],
+      'Dienste nach dem Start: Amazon ✓ angemeldet, 2 Sendungen · DHL ✓ angemeldet, 1 Sendung · DPD ✗ angemeldet, aber Abruf fehlgeschlagen',
+    );
+  });
+});

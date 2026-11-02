@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "parcel",
-    "version": "0.3.3-chris76e.8",
+    "version": "0.3.3-chris76e.9",
     "news": {
+      "0.3.3-chris76e.9": {
+        "en": "Log: one line per start and re-login showing each service (logged in, fetch OK, number of shipments)",
+        "de": "Log: nach dem Start und nach einer Neuanmeldung eine Zeile mit jedem Dienst (angemeldet, Abruf ok, Anzahl Sendungen)"
+      },
       "0.3.3-chris76e.8": {
         "en": "Amazon: the log shows why the adapter logs in again",
         "de": "Amazon: Das Log zeigt, warum sich der Adapter neu anmeldet"
