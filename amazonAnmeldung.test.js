@@ -1,7 +1,7 @@
 'use strict';
 // @ts-nocheck
 
-// Amazon nicht mehr bei jedem Abruf mit Passwort anmelden (Fork chris76e, 0.3.3-einzeln.6)
+// Amazon nicht mehr bei jedem Abruf mit Passwort anmelden (Fork chris76e)
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -10,7 +10,7 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
 const context = {
   require: (id) => {
-    if (id === './lib/einzeln') return require('./lib/einzeln');
+    if (id === './lib/chris76e') return require('./lib/chris76e');
     return { Adapter: class {}, default: {} };
   },
   module: { exports: {} },

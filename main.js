@@ -30,7 +30,7 @@ const dhlDecrypt = require('./lib/dhldecrypt');
 const { loginDhlNew: dhlLoginNew } = require('./lib/dhlLogin');
 const { loginDPD: dpdLoginSoap, fetchDPDParcels: dpdFetchParcels } = require('./lib/dpdLogin');
 const { classifyGlsDeliveryStatus } = require('./lib/glsStatus');
-const { amazonStatus, dhlStatusText, ohneDoppelte } = require('./lib/einzeln');
+const { amazonStatus, dhlStatusText, ohneDoppelte } = require('./lib/chris76e');
 // Amazon spätestens nach so vielen Stunden neu mit Passwort anmelden (sonst gespeicherte Cookies)
 const AMZ_ANMELDUNG_STD = 8;
 // Wartezeit bis zum nächsten Abruf der Briefankündigung nach einem DHL-Fehler
@@ -2263,7 +2263,7 @@ class Parcel extends utils.Adapter {
     this.log.debug(id + ' merge provider json');
     if (id === 'dhl' && data.sendungen) {
       const sendungsArray = data.sendungen.map((sendung) => {
-        // Status mit Zeitfenster "13:20 - 14:50" und Stopps nur bei echtem Zähler (lib/einzeln.js)
+        // Status mit Zeitfenster "13:20 - 14:50" und Stopps nur bei echtem Zähler (lib/chris76e.js)
         const status = dhlStatusText(sendung);
         const name = sendung.sendungsinfo.sendungsname || 'Unbekannt';
 
@@ -2684,7 +2684,7 @@ class Parcel extends utils.Adapter {
           }
         }
         if (id === 'amz' && sendung.detailedState) {
-          // shortStatus, sonst Statustext (Storno/Rücksendung, Verspätung), sonst Meilenstein (lib/einzeln.js)
+          // shortStatus, sonst Statustext (Storno/Rücksendung, Verspätung), sonst Meilenstein (lib/chris76e.js)
           const amz = amazonStatus(sendung);
           if (amz.grund !== 'shortStatus') {
             const kurz = String(sendung.detailedState.shortStatus || '');

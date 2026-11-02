@@ -93,26 +93,36 @@ Assign the datapoint `parcel.0.dhl.briefe....image` to a "String img src" elemen
 <https://forum.iobroker.net/topic/51795/test-adapter-parcel-paketverfolgung-dhl-v0-0-1>
 
 ## Changelog
+Versionen mit „chris76e“ (früher „einzeln“) stammen aus dem Fork [chris76e/ioBroker.parcel](https://github.com/chris76e/ioBroker.parcel) und bauen auf 0.3.3 von TA2k auf.
+
+### 0.3.3-chris76e.7 (2026-11-02)
+- Versionsbezeichnung „einzeln“ heißt jetzt „chris76e“; die Hilfsfunktionen des Forks liegen in `lib/chris76e.js` (Tests `chris76e.test.js`). Keine Änderung am Verhalten gegenüber 0.3.3-einzeln.6.
+
 ### 0.3.3-einzeln.6 (2026-11-02)
-- (chris76e) Amazon: Nicht mehr bei jedem Abruf mit Passwort anmelden (vorher alle 30 min „Relogin to Amazon successful“, auch nach dem Knopf eines anderen Dienstes). Abruf mit den gespeicherten Cookies; neu angemeldet wird nach 8 Stunden (`AMZ_ANMELDUNG_STD`), wenn die Bestellseite eine Anmeldung verlangt oder wenn mit der gespeicherten Sitzung keine Bestellung kommt. Start/Knopf melden an, der direkt folgende Abruf nicht noch einmal. Tests: `amazonAnmeldung.test.js`.
+- Amazon: Der Adapter meldet sich nicht mehr bei jedem Abruf mit dem Passwort an. Bisher stand deshalb alle 30 Minuten „Relogin to Amazon successful“ im Log, und auch eine Neuanmeldung bei DHL oder DPD löste eine Amazon-Anmeldung aus. Jetzt werden die Bestellungen mit der gespeicherten Sitzung abgerufen. Neu angemeldet wird nur
+  - spätestens alle 8 Stunden (`AMZ_ANMELDUNG_STD`),
+  - wenn Amazon auf der Bestellseite eine Anmeldung verlangt,
+  - wenn mit der gespeicherten Sitzung keine einzige Bestellung zurückkommt.
+
+  Weniger Passwort-Anmeldungen bedeuten weniger Captcha- und Sperr-Risiko.
 
 ### 0.3.3-einzeln.5 (2026-11-02)
-- (chris76e) DHL: Zeitfenster als „13:20 - 14:50“ in deutscher Zeit (vorher mit Sekunden, z. B. „13:20:00-14:50:00“); leere Fenster (zweimal Mitternacht, „01:00:00-01:00:00“) entfallen; „· 3 Stopps“ nur noch bei einem Zähler > 0 (vorher immer „0 Stopps“, sobald DHL Live-Tracking meldet).
-- (chris76e) Amazon: Status in dieser Reihenfolge: bekannter `shortStatus` (neu: `DELAYED`, `CANCELLED`, `RETURNED`, `RETURNING`), Statustext Storno/Rücksendung (Endstatus wie DPD `RETURN_TO_SENDER`), Statustext Verspätung (unterwegs), zuletzt erreichter Meilenstein (`progressTracker.lastReachedMilestone`). Ein nicht gelisteter `shortStatus` steht einmal je Adapterstart als Info im Log (z. B. `NO_INFORMATION_AVAILABLE` bei Verspätung).
-- (chris76e) `notDelivered`, `inDelivery` und die Zähler führen eine Sendungsnummer nur noch einmal (Amazon + DHL/DPD … mit gleicher Nummer, mehrere Amazon-Bestellungen in einem Paket). Gilt als zugestellt, sobald ein Dienst „zugestellt“ meldet; der Eintrag mit dem weitesten Stand bleibt (bei Amazon + Zusteller mit dem Amazon-Artikelnamen und `quellen`). `allProviderJson` bleibt vollständig.
-- Logik in `lib/einzeln.js`, Tests in `einzeln.test.js`.
+- DHL: Das Zustellzeitfenster steht jetzt als „13:20 - 14:50“ (deutsche Zeit, ohne Sekunden) im Status. DHL schickt manchmal ein leeres Fenster (zweimal Mitternacht, bisher „01:00:00-01:00:00“), das fällt jetzt weg.
+- DHL: „0 Stopps“ erscheint nicht mehr. Die Zahl der Stopps bis zur Zustellung steht nur noch im Status, wenn DHL wirklich eine liefert („· 3 Stopps“).
+- Amazon: Kennt der Adapter den Amazon-Status nicht, ermittelt er ihn jetzt aus dem Statustext (storniert/Rücksendung = abgeschlossen, verspätet = unterwegs) oder aus dem zuletzt erreichten Schritt der Sendungsverfolgung (bestellt, versendet, zugestellt). Ein unbekannter Status steht einmal pro Start im Log.
+- Eine Sendung, die zugleich bei Amazon und beim Zusteller (DHL, DPD …) steht, zählt in `notDelivered`, `inDelivery` und den Zählern nur noch einmal. Das gilt auch für ein Paket mit mehreren Amazon-Bestellungen. Sie gilt als zugestellt, sobald einer der beiden Dienste „zugestellt“ meldet. `allProviderJson` enthält weiterhin alle Einträge.
 
 ### 0.3.3-einzeln.4 (2026-11-02)
-- (chris76e) Amazon: Verspätete Sendungen („Neues Lieferdatum … Zuvor erwartet am …“) gelten als unterwegs (delivery_status 30) statt unbekannt (5); shortStatus `DELAYED` ergänzt, dazu Prüfung des Statustexts. Unbekannte shortStatus-Werte stehen im Debug-Log.
+- Amazon: Verspätete Sendungen („Neues Lieferdatum … Zuvor erwartet am …“) gelten als unterwegs. Bisher bekamen sie den Status „unbekannt“ und fehlten in Auswertungen offener Sendungen.
 
 ### 0.3.3-einzeln.3 (2026-10-28)
-- (chris76e) Amazon: Netzwerkfehler beim Login führen nicht mehr zum Adapter-Absturz (leere Antwort wird abgefangen, neuer Versuch beim nächsten Abruf); Fehler im Amazon-Abruf stoppen die anderen Dienste nicht mehr.
+- Amazon: Ein Netzwerkfehler bei der Anmeldung bringt den Adapter nicht mehr zum Absturz, der nächste Abruf versucht es erneut. Ein Fehler bei Amazon hält die anderen Dienste nicht mehr auf.
 
 ### 0.3.3-einzeln.2 (2026-10-28)
-- (chris76e) DHL-Verbesserungen aus dem Fork mproper23/ioBroker.parcel übernommen: Netzwerkfehler beim Token-Refresh behalten die Session, SSO-Selbstheilung (dhlSsoCookies), Briefankündigung über Auth0-Websitzung (auth.dhlAuth0Session), Briefe-Pause statt Abschalten, optionaler Web-Cookie-Import. Cookie-Felder werden verschlüsselt gespeichert.
+- DHL-Verbesserungen aus dem Fork mproper23/ioBroker.parcel übernommen: Netzwerkfehler beim Erneuern des Tokens beenden die Sitzung nicht mehr, die Sitzung kann sich über SSO-Cookies selbst erneuern (`dhlSsoCookies`), Briefankündigung über eine Auth0-Websitzung (`auth.dhlAuth0Session`), bei Fehlern pausiert die Briefankündigung statt sich abzuschalten, optionaler Import von Web-Cookies. Cookie-Felder werden verschlüsselt gespeichert.
 
 ### 0.3.3-einzeln.1 (2026-10-28)
-- (chris76e) Knöpfe `relogin.<dienst>`, `relogin.dhlCode`, `relogin.amzOtp`: einzelnen Dienst neu anmelden ohne Adapter-Neustart
+- Einzelne Dienste lassen sich ohne Neustart des Adapters neu anmelden: Datenpunkte `relogin.<dienst>` (z. B. `relogin.dpd`), dazu `relogin.dhlCode` für einen neuen DHL-Anmeldecode und `relogin.amzOtp` für einen Amazon-Einmalcode.
 
 ### 0.3.3 (2026-07-18)
 - Fix GLS states

@@ -1,15 +1,19 @@
 {
   "common": {
     "name": "parcel",
-    "version": "0.3.3-einzeln.6",
+    "version": "0.3.3-chris76e.7",
     "news": {
+      "0.3.3-chris76e.7": {
+        "en": "Fork chris76e: version suffix renamed from 'einzeln' to 'chris76e', no functional change",
+        "de": "Fork chris76e: Versionsbezeichnung 'einzeln' heißt jetzt 'chris76e', keine Änderung am Verhalten"
+      },
       "0.3.3-einzeln.6": {
-        "en": "Amazon: password login only every 8 hours or when Amazon asks for it, otherwise stored cookies",
-        "de": "Amazon: Anmeldung mit Passwort nur noch alle 8 Stunden oder wenn Amazon sie verlangt, sonst gespeicherte Cookies"
+        "en": "Amazon: no password login on every refresh any more; only every 8 hours, when Amazon asks for it or when no orders are returned",
+        "de": "Amazon: keine Passwort-Anmeldung mehr bei jedem Abruf, nur noch alle 8 Stunden, wenn Amazon sie verlangt oder keine Bestellungen kommen"
       },
       "0.3.3-einzeln.5": {
         "en": "DHL: delivery window without seconds, empty windows and '0 stops' removed; Amazon: more status fallbacks; Amazon and carrier with the same tracking number are counted once",
-        "de": "DHL: Zeitfenster ohne Sekunden, leere Fenster und '0 Stopps' entfallen; Amazon: weitere Status-Rückfälle; Amazon und Zusteller mit gleicher Sendungsnummer zählen einmal"
+        "de": "DHL: Zeitfenster ohne Sekunden, kein leeres Fenster und kein '0 Stopps' mehr; Amazon: unbekannte Status werden aus Text oder Sendungsverlauf ermittelt; Sendungen bei Amazon und Zusteller zählen nur einmal"
       },
       "0.3.3-einzeln.4": {
         "en": "Amazon: delayed shipments (new delivery date) count as in transit instead of unknown",

@@ -2,7 +2,7 @@
 // @ts-nocheck
 
 const { expect } = require('chai');
-const { amazonStatus, dhlStatusText, ohneDoppelte } = require('./lib/einzeln');
+const { amazonStatus, dhlStatusText, ohneDoppelte } = require('./lib/chris76e');
 
 const ds = { ERROR: -1, UNKNOWN: 5, REGISTERED: 10, IN_PREPARATION: 20, IN_TRANSIT: 30, OUT_FOR_DELIVERY: 40, DELIVERED: 1 };
 const amz = (shortStatus, status, meilenstein) => ({
@@ -10,7 +10,7 @@ const amz = (shortStatus, status, meilenstein) => ({
   detailedState: { shortStatus, progressTracker: meilenstein ? { lastReachedMilestone: meilenstein } : undefined },
 });
 
-describe('Amazon-Status (einzeln)', () => {
+describe('Amazon-Status (Fork chris76e)', () => {
   it('bekannte shortStatus-Werte', () => {
     expect(amazonStatus(amz('ORDER_PLACED', 'Bestellt. Zustellung: Mittwoch', 'ORDERED')).status).to.equal('REGISTERED');
     expect(amazonStatus(amz('IN_TRANSIT', 'Versendet.', 'SHIPPED')).status).to.equal('IN_TRANSIT');
@@ -41,7 +41,7 @@ describe('Amazon-Status (einzeln)', () => {
   });
 });
 
-describe('DHL-Statustext (einzeln)', () => {
+describe('DHL-Statustext (Fork chris76e)', () => {
   const dhl = (sd) => ({ sendungsdetails: Object.assign({ sendungsverlauf: { kurzStatus: 'In Zustellung' } }, sd) });
   it('Zeitfenster ohne Sekunden in deutscher Zeit', () => {
     const t = dhlStatusText(dhl({ zustellung: { zustellzeitfensterVon: '2026-10-31T13:20:00+01:00', zustellzeitfensterBis: '2026-10-31T14:50:00+01:00' } }));
@@ -75,7 +75,7 @@ describe('DHL-Statustext (einzeln)', () => {
   });
 });
 
-describe('Doppelte Sendungsnummern (einzeln)', () => {
+describe('Doppelte Sendungsnummern (Fork chris76e)', () => {
   const a = (id, source, st, name) => ({ id, source, delivery_status: st, name: name || source, status: source + ' ' + st });
   const offen = (l) => l.filter((s) => s.delivery_status !== ds.DELIVERED);
   const inZ = (l) => l.filter((s) => s.delivery_status === ds.OUT_FOR_DELIVERY);

@@ -13,7 +13,7 @@ const context = {
   require: (id) => {
     if (id === 'crypto') return require('node:crypto');
     // reine Hilfsfunktionen ohne Abhängigkeiten echt laden (Fork chris76e: Doppelte zusammenfassen)
-    if (id === './lib/einzeln') return require('./lib/einzeln');
+    if (id === './lib/chris76e') return require('./lib/chris76e');
     return { Adapter: class {}, default: {} };
   },
   module: { exports: {} },
