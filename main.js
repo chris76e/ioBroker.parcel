@@ -30,7 +30,7 @@ const dhlDecrypt = require('./lib/dhldecrypt');
 const { loginDhlNew: dhlLoginNew } = require('./lib/dhlLogin');
 const { loginDPD: dpdLoginSoap, fetchDPDParcels: dpdFetchParcels } = require('./lib/dpdLogin');
 const { classifyGlsDeliveryStatus } = require('./lib/glsStatus');
-const { amazonStatus, dhlStatusText, ohneDoppelte, dienstUebersicht } = require('./lib/chris76e');
+const { amazonStatus, dhlStatusText, ohneDoppelte, dienstUebersicht, mergeLogFuer } = require('./lib/chris76e');
 // Amazon: liegt die letzte Anmeldung weniger als so viele Minuten zurück (Start/Knopf), meldet der Abruf nicht noch einmal an
 const AMZ_ANMELDUNG_MIN = 5;
 // Wartezeit bis zum nächsten Abruf der Briefankündigung nach einem DHL-Fehler
@@ -174,10 +174,10 @@ class Parcel extends utils.Adapter {
    *
    * @param {string} anlass z. B. "nach dem Start"
    */
-  dienstStandLoggen(anlass) {
+  dienstStandLoggen(anlass, nurId) {
     const quelle = { amz: 'AMZ', dhl: 'DHL', dpd: 'DPD', gls: 'GLS', ups: 'UPS', hermes: 'Hermes', '17track': '17track', '17tuser': '17tuser' };
     const ok = this.abrufOk || new Set();
-    const dienste = PROVIDERS.filter((p) => p.id !== 'ali' && this.isProviderConfigured(p.id)).map((p) => ({
+    const dienste = PROVIDERS.filter((p) => p.id !== 'ali' && this.isProviderConfigured(p.id) && (!nurId || p.id === nurId)).map((p) => ({
       name: p.name,
       angemeldet: !!this.sessions[p.id],
       abruf: ok.has(p.id),
@@ -463,8 +463,9 @@ class Parcel extends utils.Adapter {
       if (this.sessions[id]) {
         this.log.info(provider.name + ': Neuanmeldung fertig, rufe Sendungen ab');
         this.startIntervals();
-        await this.updateProvider();
-        this.dienstStandLoggen('nach Neuanmeldung ' + provider.name);
+        // nur diesen Dienst abrufen, die anderen bleiben im normalen Rhythmus (ohne früheren Abruf: alle)
+        await this.updateProvider(this.mergeLog ? id : undefined);
+        this.dienstStandLoggen('nach Neuanmeldung', id);
       } else {
         this.log.warn(provider.name + ': Neuanmeldung fehlgeschlagen, siehe Meldungen davor');
         if (id === 'dhl' && !options.dhlCode) {
@@ -1905,8 +1906,16 @@ class Parcel extends utils.Adapter {
         this.logAxiosError('17Track/login', error);
       });
   }
-  async updateProvider() {
-    this.log.debug('updateProvider started. Sessions: ' + JSON.stringify(Object.keys(this.sessions)));
+  /**
+   * Sendungen abrufen.
+   *
+   * @param {string} [nurId] nur diesen Dienst neu abrufen (nach Neuanmeldung per Knopf); die Sendungen der anderen Dienste
+   *   kommen aus dem letzten Abruf (mergeLog), ihre Datenpunkte bleiben unverändert (Fork chris76e)
+   */
+  async updateProvider(nurId) {
+    this.log.debug('updateProvider started' + (nurId ? ' (nur ' + nurId + ')' : '') + '. Sessions: ' + JSON.stringify(Object.keys(this.sessions)));
+    const nur = (id) => !nurId || nurId === id;
+    this.mergeLogNeu = []; // alle mergeProviderJson-Aufrufe dieses Abrufs in Reihenfolge
     let dataDhl = [];
     this.mergedJson = [];
     this.mergedJsonObject = {};
@@ -1914,8 +1923,8 @@ class Parcel extends utils.Adapter {
     this.notDelivered = [];
     this.abrufOk = new Set();
     this.briefeAbruf = null; // Briefankündigung in diesem Abruf: 'ok', Fehlertext oder null (nicht abgefragt)
-    if (this.sessions['17track']) await this.update17TQuota();
-    if (this.sessions['dhl']) {
+    if (this.sessions['17track'] && nur('17track')) await this.update17TQuota();
+    if (this.sessions['dhl'] && nur('dhl')) {
       // Remove stale Akamai bot-detection cookies that cause ECONNRESET/ETIMEDOUT
       for (const domain of ['dhl.de', 'www.dhl.de']) {
         if (this.cookieJar.store.idx[domain]) {
@@ -1963,7 +1972,7 @@ class Parcel extends utils.Adapter {
           return [];
         });
     }
-    if (this.sessions['amz']) {
+    if (this.sessions['amz'] && nur('amz')) {
       try {
         await this.getAmazonPackages();
       } catch (error) {
@@ -2069,6 +2078,7 @@ class Parcel extends utils.Adapter {
     };
 
     for (const id of Object.keys(this.sessions)) {
+      if (!nur(id)) continue;
       // Provider ohne generischen statusArrays-Eintrag (z.B. DPD läuft
       // über den eigenen SOAP-Fetch weiter oben) hier überspringen.
       if (!statusArrays[id]) continue;
@@ -2233,6 +2243,23 @@ class Parcel extends utils.Adapter {
           });
       }
     }
+    // Nur ein Dienst abgerufen: Sendungen der anderen aus dem letzten Abruf übernehmen (gleiche Reihenfolge wie dort)
+    if (nurId) {
+      const log = mergeLogFuer(this.mergeLog || [], nurId, this.mergeLogNeu);
+      this.mergedJson = [];
+      this.mergedJsonObject = {};
+      this.inDelivery = [];
+      this.notDelivered = [];
+      this.mergeWiedergabe = true;
+      try {
+        for (const e of log) await this.mergeProviderJson(e.id, e.data);
+      } finally {
+        this.mergeWiedergabe = false;
+      }
+      this.mergeLog = log;
+    } else {
+      this.mergeLog = this.mergeLogNeu;
+    }
     this.log.debug('Write states');
     // Amazon + Zusteller mit gleicher Sendungsnummer nur einmal zählen (allProviderJson bleibt vollständig)
     const eindeutig = ohneDoppelte(this.notDelivered, this.inDelivery, this.mergedJson, this.delivery_status);
@@ -2287,8 +2314,10 @@ class Parcel extends utils.Adapter {
   }
   async mergeProviderJson(id, data) {
     this.log.debug(id + ' merge provider json');
+    // merken, um bei einem Abruf nur eines Dienstes die anderen wieder einsetzen zu können
+    if (!this.mergeWiedergabe && this.mergeLogNeu) this.mergeLogNeu.push({ id, data });
     // für die Übersicht "Dienste nach dem Start": Sendungsliste dieses Dienstes kam an
-    if (data && (Array.isArray(data.sendungen) || (id === '17track' && data.accepted) || id === '17tuser')) {
+    if (!this.mergeWiedergabe && data && (Array.isArray(data.sendungen) || (id === '17track' && data.accepted) || id === '17tuser')) {
       (this.abrufOk = this.abrufOk || new Set()).add(id);
     }
     if (id === 'dhl' && data.sendungen) {

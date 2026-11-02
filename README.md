@@ -95,6 +95,9 @@ Assign the datapoint `parcel.0.dhl.briefe....image` to a "String img src" elemen
 ## Changelog
 Versionen mit „chris76e“ (früher „einzeln“) stammen aus dem Fork [chris76e/ioBroker.parcel](https://github.com/chris76e/ioBroker.parcel) und bauen auf 0.3.3 von TA2k auf.
 
+### 0.3.3-chris76e.10 (2026-11-02)
+- Neuanmeldung eines einzelnen Dienstes (`relogin.<dienst>`, z. B. `relogin.dpd`): Danach werden nur noch die Sendungen dieses Dienstes abgerufen. Bisher hat der Adapter dabei alle Dienste neu abgefragt, Amazon also auch mit Anmeldung. Die Sendungen der anderen Dienste stammen aus dem letzten regulären Abruf und bleiben in `allProviderJson`, `notDelivered` und `inDelivery` erhalten. Alle Dienste werden weiter im normalen Rhythmus abgefragt. Die Logzeile danach zeigt nur den neu angemeldeten Dienst, zum Beispiel „Dienste nach Neuanmeldung: DPD ✓ angemeldet, 0 Sendungen“.
+
 ### 0.3.3-chris76e.9 (2026-11-02)
 - Amazon: Die Änderung aus 0.3.3-einzeln.6 ist zurückgenommen. Der Test hat gezeigt, dass Amazon für die Bestellübersicht nach etwa 30 Minuten wieder eine frische Anmeldung verlangt. Der Adapter meldet sich deshalb wieder vor jedem Abruf an. Ausnahme: Direkt nach dem Start oder einer Neuanmeldung (weniger als 5 Minuten) meldet sich der erste Abruf nicht noch einmal an.
 - Log: Nach dem Start und nach jeder Neuanmeldung eines Dienstes steht eine Zeile mit dem Stand aller eingerichteten Dienste, zum Beispiel „Dienste nach dem Start: Amazon ✓ angemeldet, 10 Sendungen · DHL ✓ angemeldet, 1 Sendung, Briefankündigung ✓ · DPD ✓ angemeldet, 0 Sendungen“. Ist ein Dienst nicht angemeldet, hat sein Abruf nicht geklappt oder liefert die Briefankündigung einen Fehler, steht dort ✗ mit dem Grund.

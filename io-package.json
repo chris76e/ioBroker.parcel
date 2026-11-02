@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "parcel",
-    "version": "0.3.3-chris76e.9",
+    "version": "0.3.3-chris76e.10",
     "news": {
+      "0.3.3-chris76e.10": {
+        "en": "Re-login of a single service (relogin.<service>) now only refreshes that service; the others keep their data and their normal schedule",
+        "de": "Neuanmeldung eines Dienstes (relogin.<dienst>) ruft nur noch diesen Dienst ab; die anderen behalten ihre Daten und ihren normalen Rhythmus"
+      },
       "0.3.3-chris76e.9": {
         "en": "Amazon: login before every refresh again (Amazon requires it after ~30 min), no double login after start. Log: one line per start and re-login showing each service (logged in, fetch OK, number of shipments, DHL letter notification)",
         "de": "Amazon: wieder Anmeldung vor jedem Abruf (Amazon verlangt sie nach ca. 30 min), keine doppelte Anmeldung nach dem Start. Log: nach dem Start und nach einer Neuanmeldung eine Zeile mit jedem Dienst (angemeldet, Abruf ok, Anzahl Sendungen, DHL-Briefankündigung)"
