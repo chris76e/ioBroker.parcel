@@ -95,6 +95,11 @@ Assign the datapoint `parcel.0.dhl.briefe....image` to a "String img src" elemen
 ## Changelog
 Versionen mit „chris76e“ (früher „einzeln“) stammen aus dem Fork [chris76e/ioBroker.parcel](https://github.com/chris76e/ioBroker.parcel) und bauen auf 0.3.3 von TA2k auf.
 
+### 0.3.3-chris76e.11 (2026-11-03)
+- GLS: Sendungen stehen jetzt unter ihrer Sendungsnummer wie in der GLS-App (Track-ID, sonst Paketnummer), nicht mehr unter der internen GLS-Kennung. Die interne Kennung steht in `glsId`, alle bekannten Nummern in `nummern`. Liefert Amazon dieselbe Sendung, bekommt der GLS-Eintrag die Nummer, unter der Amazon ihn führt. Amazon hängt an die 11-stellige GLS-Paketnummer teils eine Prüfziffer an. Damit zählt die Sendung in `notDelivered` und `inDelivery` nur einmal, wie bei DHL.
+- GLS: Der Status enthält die Prognose von GLS, wenn sie feststeht („Zustellung morgen“, „Zustellung heute“).
+- GLS: Die Schreibweise `DELIVERY_IN_TWO_OR_MORE_DAYS_ESTIMATE_CONFIRMED` (mit einem Unterstrich) wird als „unterwegs“ erkannt.
+
 ### 0.3.3-chris76e.10 (2026-11-02)
 - Neuanmeldung eines einzelnen Dienstes (`relogin.<dienst>`, z. B. `relogin.dpd`): Danach werden nur noch die Sendungen dieses Dienstes abgerufen. Bisher hat der Adapter dabei alle Dienste neu abgefragt, Amazon also auch mit Anmeldung. Die Sendungen der anderen Dienste stammen aus dem letzten regulären Abruf und bleiben in `allProviderJson`, `notDelivered` und `inDelivery` erhalten. Alle Dienste werden weiter im normalen Rhythmus abgefragt. Die Logzeile danach zeigt nur den neu angemeldeten Dienst, zum Beispiel „Dienste nach Neuanmeldung: DPD ✓ angemeldet, 0 Sendungen“.
 

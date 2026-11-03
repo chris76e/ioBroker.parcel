@@ -30,7 +30,15 @@ const dhlDecrypt = require('./lib/dhldecrypt');
 const { loginDhlNew: dhlLoginNew } = require('./lib/dhlLogin');
 const { loginDPD: dpdLoginSoap, fetchDPDParcels: dpdFetchParcels } = require('./lib/dpdLogin');
 const { classifyGlsDeliveryStatus } = require('./lib/glsStatus');
-const { amazonStatus, dhlStatusText, ohneDoppelte, dienstUebersicht, mergeLogFuer } = require('./lib/chris76e');
+const {
+  amazonStatus,
+  dhlStatusText,
+  ohneDoppelte,
+  dienstUebersicht,
+  mergeLogFuer,
+  glsSendung,
+  glsAnAmazonAngleichen,
+} = require('./lib/chris76e');
 // Amazon: liegt die letzte Anmeldung weniger als so viele Minuten zurück (Start/Knopf), meldet der Abruf nicht noch einmal an
 const AMZ_ANMELDUNG_MIN = 5;
 // Wartezeit bis zum nächsten Abruf der Briefankündigung nach einem DHL-Fehler
@@ -2261,6 +2269,8 @@ class Parcel extends utils.Adapter {
       this.mergeLog = this.mergeLogNeu;
     }
     this.log.debug('Write states');
+    // GLS-Sendungen bekommen die Nummer, unter der Amazon sie führt (Amazon hängt teils eine Prüfziffer an)
+    glsAnAmazonAngleichen(this.mergedJson, this.mergedJsonObject);
     // Amazon + Zusteller mit gleicher Sendungsnummer nur einmal zählen (allProviderJson bleibt vollständig)
     const eindeutig = ohneDoppelte(this.notDelivered, this.inDelivery, this.mergedJson, this.delivery_status);
     this.notDelivered = eindeutig.notDelivered;
@@ -2347,11 +2357,15 @@ class Parcel extends utils.Adapter {
       const sendungsArray = data.sendungen.map((sendung) => {
         // Neues Schema (glsnxt): { id (UUID), trackingReference, parcelNumber, name, latestStatusText,
         //                          deliveryDirection: "INCOMING"|"OUTGOING", deliveredAt, hasDeliveryAttemptFailed, ... }
+        // id = Sendungsnummer wie in der GLS-App/bei Amazon (statt interner UUID, die steht in glsId)
+        const gls = glsSendung(sendung);
         const sendungsObject = {
-          id: sendung.id,
+          id: gls.id,
+          glsId: gls.glsId,
+          nummern: gls.nummern,
           tracking: sendung.trackingReference || sendung.parcelNumber,
-          name: sendung.name || sendung.parcelNumber || sendung.trackingReference,
-          status: sendung.latestStatusText || '',
+          name: (sendung.name && String(sendung.name).trim()) || sendung.parcelNumber || sendung.trackingReference,
+          status: gls.status,
           source: 'GLS',
           direction: sendung.deliveryDirection,
         };
@@ -2364,7 +2378,7 @@ class Parcel extends utils.Adapter {
         if (sendungsObject.delivery_status !== this.delivery_status.DELIVERED) {
           this.notDelivered.push(sendungsObject);
         }
-        this.mergedJsonObject[sendung.id] = sendungsObject;
+        this.mergedJsonObject[sendungsObject.id] = sendungsObject;
         return sendungsObject;
       });
       this.mergedJson = this.mergedJson.concat(sendungsArray);
