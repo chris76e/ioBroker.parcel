@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "parcel",
-    "version": "0.3.3-chris76e.11",
+    "version": "0.3.3-chris76e.12",
     "news": {
+      "0.3.3-chris76e.12": {
+        "en": "Fix crash from 0.3.3-chris76e.11 (\"Cannot read properties of undefined (reading 'source')\") when a notification was sent while the GLS number was matched to Amazon",
+        "de": "Absturz aus 0.3.3-chris76e.11 behoben (\"Cannot read properties of undefined (reading 'source')\"), wenn während des Abgleichs GLS/Amazon eine Benachrichtigung lief"
+      },
       "0.3.3-chris76e.11": {
         "en": "GLS: shipments use their tracking number (as in the GLS app / at Amazon) instead of the internal GLS id, so Amazon + GLS count once like DHL; status shows the GLS forecast (delivery today/tomorrow)",
         "de": "GLS: Sendungen haben ihre Sendungsnummer (wie in der GLS-App bzw. bei Amazon) statt der internen GLS-Kennung, dadurch zählen Amazon + GLS nur einmal wie bei DHL; Status zeigt die GLS-Prognose (Zustellung heute/morgen)"

@@ -2270,7 +2270,7 @@ class Parcel extends utils.Adapter {
     }
     this.log.debug('Write states');
     // GLS-Sendungen bekommen die Nummer, unter der Amazon sie führt (Amazon hängt teils eine Prüfziffer an)
-    glsAnAmazonAngleichen(this.mergedJson, this.mergedJsonObject);
+    glsAnAmazonAngleichen(this.mergedJson);
     // Amazon + Zusteller mit gleicher Sendungsnummer nur einmal zählen (allProviderJson bleibt vollständig)
     const eindeutig = ohneDoppelte(this.notDelivered, this.inDelivery, this.mergedJson, this.delivery_status);
     this.notDelivered = eindeutig.notDelivered;
@@ -2552,6 +2552,10 @@ class Parcel extends utils.Adapter {
       const sendungen = this.mergedJsonObject;
       const ids = Object.keys(sendungen);
       for (const id of ids) {
+        // Liste kann sich während der await-Aufrufe unten ändern (mergeProviderJson läuft ohne await)
+        if (!sendungen[id]) {
+          continue;
+        }
         if (
           this.alreadySentMessages[id + sendungen[id].source] === sendungen[id].status ||
           sendungen[id].status === '' ||

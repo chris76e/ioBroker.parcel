@@ -69,8 +69,9 @@ describe('glsAnAmazonAngleichen', () => {
     expect(glsAnAmazonAngleichen(alle, nachId)).to.equal(1);
     expect(g1.id).to.equal('ZMORSQBI');
     expect(g2.id).to.equal('420306106265');
-    expect(nachId['42030610626']).to.equal(undefined);
-    expect(nachId['420306106265']).to.equal(a2);
+    // allProviderObjects bleibt unverändert (sonst Absturz in der Benachrichtigungsschleife, 03.11.2026)
+    expect(nachId['42030610626']).to.equal(g2);
+    expect(Object.keys(nachId)).to.have.length(3);
     // zusammen mit ohneDoppelte: jede Sendung zählt einmal
     const r = ohneDoppelte([a1, a2, g1, g2], [], alle, ds);
     expect(r.notDelivered).to.have.length(2);

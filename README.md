@@ -95,6 +95,9 @@ Assign the datapoint `parcel.0.dhl.briefe....image` to a "String img src" elemen
 ## Changelog
 Versionen mit „chris76e“ (früher „einzeln“) stammen aus dem Fork [chris76e/ioBroker.parcel](https://github.com/chris76e/ioBroker.parcel) und bauen auf 0.3.3 von TA2k auf.
 
+### 0.3.3-chris76e.12 (2026-11-03)
+- Absturz behoben, den 0.3.3-chris76e.11 verursacht hat: Beim Angleichen der GLS-Nummer an Amazon wurde der alte Eintrag aus `allProviderObjects` gelöscht. Lief gleichzeitig eine Benachrichtigung (z. B. Telegram) über genau diese Sendung, brach der Adapter mit „Cannot read properties of undefined (reading 'source')“ ab und startete neu. `allProviderObjects` bleibt jetzt unverändert, und die Benachrichtigung überspringt Einträge, die es nicht mehr gibt.
+
 ### 0.3.3-chris76e.11 (2026-11-03)
 - GLS: Sendungen stehen jetzt unter ihrer Sendungsnummer wie in der GLS-App (Track-ID, sonst Paketnummer), nicht mehr unter der internen GLS-Kennung. Die interne Kennung steht in `glsId`, alle bekannten Nummern in `nummern`. Liefert Amazon dieselbe Sendung, bekommt der GLS-Eintrag die Nummer, unter der Amazon ihn führt. Amazon hängt an die 11-stellige GLS-Paketnummer teils eine Prüfziffer an. Damit zählt die Sendung in `notDelivered` und `inDelivery` nur einmal, wie bei DHL.
 - GLS: Der Status enthält die Prognose von GLS, wenn sie feststeht („Zustellung morgen“, „Zustellung heute“).
