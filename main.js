@@ -1214,6 +1214,10 @@ class Parcel extends utils.Adapter {
       /* noop */
     }
   }
+  /**
+   * @param {boolean} [silent]
+   * @returns {Promise<boolean>} true = angemeldet
+   */
   async loginDPD(silent) {
     const session = await dpdLoginSoap({
       requestClient: this.requestClient,
@@ -1221,10 +1225,24 @@ class Parcel extends utils.Adapter {
       password: this.config.dpdpassword,
       log: this.log,
     });
-    if (!session) {
-      await this.clearDPDSession();
-      return;
+    if (session && session.netzfehler) {
+      // Netzwerkaussetzer: nicht abmelden. Vorhandene Session weiter benutzen,
+      // sonst holt refreshToken() die Anmeldung beim nächsten Durchlauf nach.
+      this.log.warn(
+        'DPD-Anmeldung vorübergehend fehlgeschlagen (' +
+          session.meldung +
+          ') – ' +
+          (this.sessions['dpd'] ? 'bisherige Session bleibt erhalten' : 'neuer Versuch in spätestens 29 min'),
+      );
+      return false;
     }
+    if (!session) {
+      // echte Ablehnung (z. B. falsches Passwort): nicht automatisch wiederholen
+      this.dpdAbgelehnt = true;
+      await this.clearDPDSession();
+      return false;
+    }
+    this.dpdAbgelehnt = false;
     this.sessions['dpd'] = session;
     !silent && this.log.info('Login to DPD successful (SOAP)');
 
@@ -1245,6 +1263,7 @@ class Parcel extends utils.Adapter {
     });
     this.setState('auth.dpdSession', JSON.stringify(session), true);
     this.setState('info.connection', true, true);
+    return true;
   }
   /**
    * Holt die aktuelle Sendungsliste. Bei ungültiger Session wird einmalig
@@ -1276,8 +1295,7 @@ class Parcel extends utils.Adapter {
         return null;
       }
       this.log.info(`[DPD/fetch] session invalid (${result.errorCode || 'unknown'}), attempting re-login`);
-      await this.loginDPD(true);
-      if (this.sessions['dpd']) {
+      if (await this.loginDPD(true)) {
         return this.fetchDPDParcels(true);
       }
       return null;
@@ -3670,11 +3688,16 @@ class Parcel extends utils.Adapter {
    * @param {string} [onlyId] - nur diesen Dienst erneuern (sonst alle)
    */
   async refreshToken(onlyId) {
-    if (Object.keys(this.sessions).length === 0) {
+    const ids = Object.keys(this.sessions);
+    // DPD nach Netzwerkaussetzer ohne Session: Anmeldung hier nachholen (nicht nach echter Ablehnung)
+    if (!ids.includes('dpd') && !this.dpdAbgelehnt && this.isProviderConfigured('dpd')) {
+      ids.push('dpd');
+    }
+    if (ids.length === 0) {
       this.log.error('No session found relogin');
       return;
     }
-    for (const id of Object.keys(this.sessions)) {
+    for (const id of ids) {
       if (onlyId && id !== onlyId) continue;
       if (id === 'dhl') {
         await this.requestClient({
@@ -3735,7 +3758,10 @@ class Parcel extends utils.Adapter {
           });
       }
       if (id === 'dpd') {
-        await this.loginDPD(true);
+        const vorher = !!this.sessions['dpd'];
+        if ((await this.loginDPD(true)) && !vorher) {
+          this.log.info('Relogin to DPD successful (nach Netzwerkaussetzer)');
+        }
       }
       if (id === '17tuser') {
         this.login17T(true);

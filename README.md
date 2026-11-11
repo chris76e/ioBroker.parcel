@@ -95,6 +95,9 @@ Assign the datapoint `parcel.0.dhl.briefe....image` to a "String img src" elemen
 ## Changelog
 Versionen mit „chris76e“ (früher „einzeln“) stammen aus dem Fork [chris76e/ioBroker.parcel](https://github.com/chris76e/ioBroker.parcel) und bauen auf 0.3.3 von TA2k auf.
 
+### 0.3.3-chris76e.13 (2026-11-11)
+- DPD bleibt nach Netzwerkaussetzern angemeldet. Bisher meldete jeder einmalige Fehler (z. B. `read ECONNRESET`) bei der Neuanmeldung alle 29 min DPD dauerhaft ab: die Session wurde gelöscht und nie wieder versucht, bis man `relogin.dpd` drückte oder den Adapter neu startete. Jetzt bleibt bei Netzwerk-/Serverfehlern (kein HTTP-Status, 5xx, 429) die bisherige Session erhalten (Warnung „DPD-Anmeldung vorübergehend fehlgeschlagen … bisherige Session bleibt erhalten“). Fehlt die Session (z. B. Netzfehler beim Start), holt der nächste 29-min-Durchlauf die Anmeldung nach („Relogin to DPD successful (nach Netzwerkaussetzer)“). Nur eine echte Ablehnung durch DPD (falsches Passwort) meldet ab und wird nicht automatisch wiederholt.
+
 ### 0.3.3-chris76e.12 (2026-11-03)
 - Absturz behoben, den 0.3.3-chris76e.11 verursacht hat: Beim Angleichen der GLS-Nummer an Amazon wurde der alte Eintrag aus `allProviderObjects` gelöscht. Lief gleichzeitig eine Benachrichtigung (z. B. Telegram) über genau diese Sendung, brach der Adapter mit „Cannot read properties of undefined (reading 'source')“ ab und startete neu. `allProviderObjects` bleibt jetzt unverändert, und die Benachrichtigung überspringt Einträge, die es nicht mehr gibt.
 

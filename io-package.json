@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "parcel",
-    "version": "0.3.3-chris76e.12",
+    "version": "0.3.3-chris76e.13",
     "news": {
+      "0.3.3-chris76e.13": {
+        "en": "DPD: a network hiccup (e.g. ECONNRESET) during the 29-min re-login no longer logs DPD out; the existing session is kept, and a missing login is retried automatically. Only a real rejection (wrong password) logs out",
+        "de": "DPD: Ein Netzwerkaussetzer (z. B. ECONNRESET) bei der Neuanmeldung alle 29 min meldet DPD nicht mehr ab; die bisherige Session bleibt, eine fehlende Anmeldung wird automatisch nachgeholt. Nur eine echte Ablehnung (falsches Passwort) meldet ab"
+      },
       "0.3.3-chris76e.12": {
         "en": "Fix crash from 0.3.3-chris76e.11 (\"Cannot read properties of undefined (reading 'source')\") when a notification was sent while the GLS number was matched to Amazon",
         "de": "Absturz aus 0.3.3-chris76e.11 behoben (\"Cannot read properties of undefined (reading 'source')\"), wenn während des Abgleichs GLS/Amazon eine Benachrichtigung lief"
